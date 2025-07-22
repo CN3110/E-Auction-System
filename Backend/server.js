@@ -1,64 +1,47 @@
 const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
 const http = require('http');
 const socketIo = require('socket.io');
+const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-    cors: {
-        origin: "http://localhost:5173", // React app URL
-        methods: ["GET", "POST"]
-    }
+  cors: {
+    origin: process.env.FRONTEND_URL,
+    methods: ["GET", "POST"]
+  }
 });
 
 // Middleware
-app.use(helmet());
 app.use(cors());
-app.use(morgan('combined'));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Basic route
-app.get('/', (req, res) => {
-    res.json({ 
-        message: 'E-Auction System API',
-        version: '1.0.0',
-        status: 'running'
-    });
-});
+// Routes
+app.use('/api/auth', require('./Routes/auth'));
+app.use('/api/admin', require('./Routes/'));
+app.use('/api/auction', require('./src/routes/auction'));
+app.use('/api/bidder', require('./src/routes/bidder'));
 
-// Socket.io connection handling
+// Real-time handling
 io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
-    
-    socket.on('disconnect', () => {
-        console.log('User disconnected:', socket.id);
-    });
-});
-
-// Global error handler
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ 
-        error: 'Something went wrong!',
-        message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
-    });
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-    res.status(404).json({ error: 'Route not found' });
+  console.log('User connected:', socket.id);
+  
+  socket.on('join-auction', (auctionId) => {
+    socket.join(`auction-${auctionId}`);
+  });
+  
+  socket.on('place-bid', async (data) => {
+    // Handle bid placement
+    io.to(`auction-${data.auctionId}`).emit('bid-update', data);
+  });
+  
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+  });
 });
 
 const PORT = process.env.PORT || 5000;
-
 server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV}`);
+  console.log(`Server running on port ${PORT}`);
 });
-
-module.exports = { app, io };
