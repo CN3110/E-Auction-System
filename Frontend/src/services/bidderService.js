@@ -31,12 +31,26 @@ export const fetchBidders = async () => {
   }
 };
 
-export const removeBidder = async (bidderId) => {
+export const deactivateBidder = async (bidderId) => {
   try {
-    const response = await axios.delete(`${API_URL}/bidders/${bidderId}`);
+    const response = await axios.patch(
+      `${API_URL}/bidders/${bidderId}/deactivate`
+    );
     return response.data;
   } catch (error) {
-    console.error('Error removing bidder:', error);
+    console.error('Deactivation failed:', error.response?.data || error.message);
+    throw error;
+  }
+};
+
+export const reactivateBidder = async (bidderId) => {
+  try {
+    const response = await axios.patch(
+      `${API_URL}/bidders/${bidderId}/reactivate`
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Reactivation failed:', error.response?.data || error.message);
     throw error;
   }
 };
