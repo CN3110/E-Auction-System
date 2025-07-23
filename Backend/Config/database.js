@@ -44,7 +44,7 @@ async function testConnection() {
 }
 
 module.exports = {
-    supabaseAdmin,
-    supabaseClient,
+    supabaseAdmin,  // This is the admin client
+  supabaseClient, // This is the public client
     testConnection
 };

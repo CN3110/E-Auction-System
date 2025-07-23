@@ -3,12 +3,24 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 require('dotenv').config();
+const { testConnection } = require('./Config/database');
+
+
+// Test DB connection on startup
+testConnection().then(success => {
+  if (!success) {
+    console.error("❌ Failed to connect to database!");
+    process.exit(1);
+  }
+  console.log("✅ Database connection verified");
+});
+
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.FRONTEND_URL,
+    origin: "http://localhost:5173",
     methods: ["GET", "POST"]
   }
 });
@@ -19,9 +31,17 @@ app.use(express.json());
 
 // Routes
 app.use('/api/auth', require('./Routes/auth'));
-app.use('/api/admin', require('./Routes/'));
-app.use('/api/auction', require('./src/routes/auction'));
-app.use('/api/bidder', require('./src/routes/bidder'));
+app.use('/api/admin', require('./Routes/admin'));
+//app.use('/api/auction', require('./src/routes/auction'));
+//app.use('/api/bidder', require('./src/routes/bidder'));
+
+console.log("Admin routes path:", require.resolve('./Routes/admin'));
+
+// Modify your route registration
+const adminRouter = require('./Routes/admin');
+app.use('/api/admin', adminRouter);
+console.log("Registered admin routes:");
+console.log(adminRouter.stack);
 
 // Real-time handling
 io.on('connection', (socket) => {
@@ -40,6 +60,13 @@ io.on('connection', (socket) => {
     console.log('User disconnected:', socket.id);
   });
 });
+
+// Test route - Add this before server.listen()
+app.get('/api/test-route', (req, res) => {
+  console.log("Test route was hit!");
+  res.json({ message: "Backend is working!" });
+});
+
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {

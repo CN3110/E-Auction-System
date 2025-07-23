@@ -93,3 +93,33 @@
 .remove-btn:hover {
   background: #c82333;
 }
+
+.loading, .error {
+  text-align: center;
+  padding: 20px;
+  font-size: 18px;
+}
+
+.error {
+  color: #ff4444;
+}
+
+.bidder-status .active {
+  color: #00C851;
+  font-weight: bold;
+}
+
+.bidder-status .inactive {
+  color: #ff4444;
+  font-weight: bold;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Toast notifications positioning */
+.Toastify__toast-container {
+  margin-top: 50px;
+}

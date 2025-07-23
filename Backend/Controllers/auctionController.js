@@ -52,7 +52,7 @@ const createAuction = async (req, res) => {
     
     for (const bidder of bidders) {
       const emailHTML = `
-        <h2>New Auction Invitation</h2>
+        <h2>Auction Invitation - Anunine Holdings Pvt Ltd</h2>
         <p>Dear ${bidder.name},</p>
         <p>You've been invited to participate in a new auction:</p>
         <p><strong>Title:</strong> ${title}</p>
@@ -78,39 +78,40 @@ const getLiveRankings = async (req, res) => {
   try {
     const { auctionId } = req.params;
     
-    const { data, error } = await supabase
+    // Get all bids for this auction, ordered by amount (ascending)
+    const { data: bids, error } = await supabase
       .from('bids')
       .select(`
         *,
         users:bidder_id (user_id, name)
       `)
       .eq('auction_id', auctionId)
-      .order('amount', { ascending: false });
+      .order('amount', { ascending: true }) // Changed to ascending order
+      .order('bid_time', { ascending: true }); // Secondary sort by time
     
     if (error) throw error;
     
-    // Group by bidder and get latest bid
-    const rankings = [];
-    const bidderMap = new Map();
+    // Process bids - keep only the lowest bid per bidder
+    const rankingsMap = new Map();
     
-    data.forEach(bid => {
-      if (!bidderMap.has(bid.bidder_id) || bidderMap.get(bid.bidder_id).amount < bid.amount) {
-        bidderMap.set(bid.bidder_id, bid);
+    bids.forEach(bid => {
+      if (!rankingsMap.has(bid.bidder_id)) {
+        rankingsMap.set(bid.bidder_id, {
+          bidder_id: bid.users.user_id,
+          bidder_name: bid.users.name,
+          amount: bid.amount,
+          bid_time: bid.bid_time
+        });
       }
     });
     
-    bidderMap.forEach((bid, bidderId) => {
-      rankings.push({
-        rank: rankings.length + 1,
-        bidder_id: bid.users.user_id,
-        bidder_name: bid.users.name,
-        amount: bid.amount,
-        bid_time: bid.bid_time
-      });
-    });
-    
-    rankings.sort((a, b) => b.amount - a.amount);
-    rankings.forEach((rank, index) => rank.rank = index + 1);
+    // Convert to array and assign ranks
+    const rankings = Array.from(rankingsMap.values())
+      .sort((a, b) => a.amount - b.amount) // Sort by amount (ascending)
+      .map((item, index) => ({
+        ...item,
+        rank: index + 1 // Assign ranks starting from 1
+      }));
     
     res.json({ success: true, rankings });
   } catch (error) {

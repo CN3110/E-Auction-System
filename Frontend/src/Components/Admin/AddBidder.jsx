@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Card from '../Common/Card';
 import '../../styles/addBidder.css';
-
+import { addBidder, fetchBidders, removeBidder } from '../../services/bidderService';
+import { toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 const AddBidder = () => {
   const [formData, setFormData] = useState({
@@ -11,139 +13,154 @@ const AddBidder = () => {
     company: ''
   });
 
-  const [bidders, setBidders] = useState([
-    {
-      id: "B001",
-      name: "VYS International",
-      email: "vysinternational@gmail.com",
-    },
-    {
-      id: "B002",
-      name: "Techtron integrated Solutions Pvt Ltd",
-      email: "gihan@techtron.lk",
-      },
-    {
-      id: "B003",
-      name: "Daylight Data Solutions Pvt Ltd",
-      email: "daylightdata@gmail.com",
-      },
-    {
-      id: "B004",
-      name: "Kamsons Trading Company PVT Ltd",
-      email: "kamsonhardware@gmail.com",
-      
-    },
-    {
-      id: "B005",
-      name: "Colonial Engineering (Pvt) Ltd",
-      email: "coloneng@sltnet.lk",
-      
-    },
-    {
-      id: "B006",
-      name: "Monara Engineering & Trading (Pvt) Ltd",
-      email: "sales_monara@sltnet.lk",
-      
-    },
-    {
-      id: "B007",
-      name: "Thilakarathne Rubbers",
-      email: "sales@methg.com",
-      
-    },
-    {
-      id: "B008",
-      name: "Nikini Automation Systems (Pvt) Ltd",
-      email: "nishadhi@nikiniautomation.com",
-      
-    },
-    {
-      id: "B009",
-      name: "Everbolt Engineering (Pvt) Ltd",
-      email: "sales6@everbolt.lk",
-      
-    }
+  const [bidders, setBidders] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  ]);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const newBidder = {
-      ...formData,
-      id: `B00${bidders.length + 1}`,
-      status: 'Active',
-      registrationDate: new Date().toISOString().split('T')[0]
+  // Fetch bidders on component mount
+  useEffect(() => {
+    const loadBidders = async () => {
+      try {
+        const data = await fetchBidders();
+        setBidders(data);
+      } catch (err) {
+        setError(err.message);
+        toast.error('Failed to load bidders');
+      } finally {
+        setIsLoading(false);
+      }
     };
-    setBidders([...bidders, newBidder]);
-    setFormData({ name: '', email: '', phone: '', company: '' });
-  };
+    
+    loadBidders();
+  }, []);
 
-  const handleRemoveBidder = (bidderId) => {
+  const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  try {
+    const newBidder = await addBidder({
+      name: formData.name,
+      email: formData.email,
+      company: formData.company,
+      phone: formData.phone
+    });
+
+    // Update state with the new bidder from response
+    setBidders(prev => [...prev, newBidder.bidder]);
+    setFormData({ name: '', email: '', phone: '', company: '' });
+    
+    toast.success('Bidder added successfully!');
+  } catch (error) {
+    toast.error(error.message);
+  }
+};
+
+  const handleRemoveBidder = async (bidderId) => {
     if (window.confirm('Are you sure you want to remove this bidder?')) {
-      setBidders(prev => prev.filter(bidder => bidder.id !== bidderId));
-      alert('Bidder removed successfully');
+      try {
+        setIsLoading(true);
+        await removeBidder(bidderId);
+        setBidders(prev => prev.filter(bidder => bidder.user_id !== bidderId));
+        toast.success('Bidder removed successfully');
+      } catch (err) {
+        toast.error(err.response?.data?.error || 'Failed to remove bidder');
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
+
+  if (isLoading && bidders.length === 0) {
+    return <div className="loading">Loading bidders...</div>;
+  }
+
+  if (error) {
+    return <div className="error">Error: {error}</div>;
+  }
 
   return (
-     <>
-    <Card>
-      <form onSubmit={handleSubmit} className="form-grid">
-        <div className="form-group">
-          <label>Bidder Name</label>
-          <input
-            type="text"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            required
-          />
-        </div>
-        <div className="form-group">
-          <label>Email</label>
-          <input
-            type="email"
-            value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            required
-          />
-        </div> 
-        
-        <div className="form-group">
-          <label>Company</label>
-          <input
-            type="text"
-            value={formData.company}
-            onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-            required
-          />
-        </div>
-       <div className="form-group flex justify-center">
-  <button type="submit" className="btn btn-primary">Add Bidder</button>
-</div>
+    <>
+      <Card>
+        <form onSubmit={handleSubmit} className="form-grid">
+          <div className="form-group">
+            <label>Bidder Name *</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label>Email *</label>
+            <input
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              required
+            />
+          </div> 
+          
+          <div className="form-group">
+            <label>Company *</label>
+            <input
+              type="text"
+              value={formData.company}
+              onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+              required
+            />
+          </div>
 
-      </form>
+          <div className="form-group">
+            <label>Phone</label>
+            <input
+              type="tel"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+            />
+          </div>
 
-      <div className="bidder-list">
-        <h4>Registered Bidders</h4>
-        <div className="bidder-cards">
-          {bidders.map((bidder) => (
-            <div key={bidder.id} className="bidder-card">
-              <div className="bidder-info">
-                <h5>{bidder.name} <span className="bidder-id">({bidder.id})</span></h5>
-                <p className="bidder-company">{bidder.company}</p>
-                <p className="bidder-contact">
-                  <span>{bidder.email}</span>
-                </p>
-              </div>
-              <button className="remove-btn" onClick={() => handleRemoveBidder(bidder.id)}>
-                Remove
-              </button>
+          <div className="form-group flex justify-center">
+            <button type="submit" className="btn btn-primary" disabled={isLoading}>
+              {isLoading ? 'Adding...' : 'Add Bidder'}
+            </button>
+          </div>
+        </form>
+
+        <div className="bidder-list">
+          <h4>Registered Bidders</h4>
+          {bidders.length === 0 ? (
+            <p>No bidders registered yet</p>
+          ) : (
+            <div className="bidder-cards">
+              {bidders.map((bidder) => (
+                <div key={bidder.user_id} className="bidder-card"> 
+                  <div className="bidder-info">
+                    <h5>{bidder.name} <span className="bidder-id">({bidder.user_id})</span></h5>
+                    <p className="bidder-company">{bidder.company}</p>
+                    <p className="bidder-contact">
+                      <span>{bidder.email}</span>
+                      {bidder.phone && <span> | {bidder.phone}</span>}
+                    </p>
+                    <p className="bidder-status">
+  Status: <span className={bidder.is_active ? 'active' : 'inactive'}>
+    {bidder.is_active ? 'Active' : 'Inactive'}
+  </span>
+</p>
+                  </div>
+                  <button 
+                    className="remove-btn" 
+                    onClick={() => handleRemoveBidder(bidder.user_id)}
+                    disabled={isLoading}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
-      </div>
-    </Card>
-    
+      </Card>
     </>
   );
 };

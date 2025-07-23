@@ -2,10 +2,10 @@ const express = require('express');
 const app = express();
 
 // Import routes
-const authRoutes = require('./routes/auth');
-const adminRoutes = require('./routes/admin');
-const auctionRoutes = require('./routes/auction');
-const bidderRoutes = require('./routes/bidder');
+const authRoutes = require('./Routes/auth');
+const adminRoutes = require('./Routes/admin');
+const auctionRoutes = require('./Routes/auction');
+const bidderRoutes = require('./Routes/bidder');
 
 // Middleware
 app.use(express.json());

@@ -1,26 +1,38 @@
-const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../Config/database');
 const bcrypt = require('bcryptjs');
 const { sendEmail } = require('../Config/email');
 const { generateBidderId, generatePassword } = require('../Utils/generators');
 
 const registerBidder = async (req, res) => {
   try {
-    const { name, email, company } = req.body;
+    console.log('Request body:', req.body);
+    const { name, email, company, phone } = req.body;
     
+    // Validate required fields
+    if (!name || !email || !company) {
+      throw new Error('Missing required fields');
+    }
+
     // Get last bidder ID
-    const { data: lastBidder } = await supabase
+    const { data: lastBidder, error: lastBidderError } = await supabaseAdmin
       .from('users')
       .select('user_id')
       .eq('role', 'bidder')
       .order('user_id', { ascending: false })
       .limit(1);
     
+    if (lastBidderError) throw lastBidderError;
+    
     const bidderId = generateBidderId(lastBidder?.[0]?.user_id);
     const password = generatePassword();
     const hashedPassword = await bcrypt.hash(password, 10);
     
+    console.log('Creating bidder with:', {
+      bidderId, email, name, company, phone
+    });
+
     // Insert new bidder
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('users')
       .insert([{
         user_id: bidderId,
@@ -29,22 +41,24 @@ const registerBidder = async (req, res) => {
         role: 'bidder',
         name,
         company,
+        phone: phone || null,
         is_active: true
       }])
       .select();
     
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase insert error:', error);
+      throw error;
+    }
+
+    console.log('Bidder created successfully:', data[0]);
     
     // Send email with credentials
     const emailHTML = `
       <h2>Welcome to E-Auction System</h2>
-      <p>Dear ${name},</p>
-      <p>Your bidder account has been created successfully.</p>
+      <p>Your account has been created successfully.</p>
       <p><strong>User ID:</strong> ${bidderId}</p>
       <p><strong>Password:</strong> ${password}</p>
-      <p>Please login and change your password.</p>
-      <br>
-      <p>Best regards,<br>Anunine Holdings Pvt Ltd</p>
     `;
     
     await sendEmail(email, 'E-Auction Account Created', emailHTML);
@@ -56,23 +70,36 @@ const registerBidder = async (req, res) => {
     });
     
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Error in registerBidder:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
 const getBidders = async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // Use supabaseAdmin (the properly imported client)
+    const { data, error } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('role', 'bidder')
       .order('created_at', { ascending: false });
-    
+
     if (error) throw error;
     
-    res.json({ success: true, bidders: data });
+    res.json({ 
+      success: true,
+      bidders: data
+    });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Error fetching bidders:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 };
 
@@ -95,8 +122,34 @@ const updateBidderStatus = async (req, res) => {
   }
 };
 
+const testDbConnection = async (req, res) => {
+  try {
+    // Test with a simple query
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('*')
+      .limit(1);
+    
+    if (error) throw error;
+    
+    res.json({
+      success: true,
+      connection: "Database connected successfully",
+      data: data || "No data (table might be empty)"
+    });
+  } catch (error) {
+    console.error("Database error details:", error);
+    res.status(500).json({
+      success: false,
+      message: "Database connection failed",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   registerBidder,
   getBidders,
-  updateBidderStatus
+  updateBidderStatus,
+  testDbConnection
 };
