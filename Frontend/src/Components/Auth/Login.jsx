@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Alert from '../Common/Alert';
 import Footer from '../Common/Footer';
 import '../../styles/auth.css';
@@ -9,16 +10,60 @@ const Login = ({ onLogin }) => {
     password: ''
   });
   const [alert, setAlert] = useState({ show: false, message: '', type: '' });
+  const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // Handle login logic here
+    setIsLoading(true);
+    setAlert({ show: false, message: '', type: '' });
+
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: credentials.userId,
+          password: credentials.password
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Login failed');
+      }
+
+      // Store token and user data
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+
+      // Redirect based on role
+      if (data.user.role === 'admin') {
+        navigate('/admindashboard');
+      } else if (data.user.role === 'bidder') {
+        navigate('/bidderdashboard');
+      } else {
+        throw new Error('Unknown user role');
+      }
+
+    } catch (error) {
+      setAlert({
+        show: true,
+        message: error.message,
+        type: 'error'
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <>
-  <div className="login-page">
-    <div className="login-form">
+      <div className="login-page">
+        <div className="login-form">
           <h2>
             Login to <br /> E-Auction System
             <br /> Anunine Holdings Pvt Ltd
@@ -30,8 +75,8 @@ const Login = ({ onLogin }) => {
               <input 
                 type="text" 
                 value={credentials.userId}
-                onChange={(e) => setCredentials({ ...credentials, userId: e.target.value })}
-                placeholder="Enter your User ID" 
+                onChange={(e) => setCredentials({ ...credentials, userId: e.target.value.toUpperCase()})}
+                placeholder="Enter your User ID (ADMIN or BXXXX)" 
                 required 
               />
             </div>
@@ -45,14 +90,19 @@ const Login = ({ onLogin }) => {
                 required 
               />
             </div>
-            <button type="submit" className="btn btn-primary">Login</button>
+            <button 
+              type="submit" 
+              className="btn btn-primary"
+              disabled={isLoading}
+            >
+              {isLoading ? 'Logging in...' : 'Login'}
+            </button>
           </form>
           {alert.show && <Alert message={alert.message} type={alert.type} />}
-       </div>
+        </div>
         <Footer />
-  </div>
- 
-</>
+      </div>
+    </>
   );
 };
 

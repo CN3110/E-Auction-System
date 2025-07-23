@@ -2,15 +2,52 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const supabase = require('../Config/database').supabaseClient;
 
+// Hardcoded admin credentials
+const ADMIN_CREDENTIALS = {
+  user_id: 'ADMIN',
+  password: 'admin123' // This should be hashed in production
+};
+
 const login = async (req, res) => {
   try {
     const { user_id, password } = req.body;
 
-    // Find user by user_id
+    // Handle admin login
+    if (user_id.toUpperCase() === ADMIN_CREDENTIALS.user_id) {
+      if (password !== ADMIN_CREDENTIALS.password) {
+        return res.status(401).json({ success: false, error: 'Invalid admin credentials' });
+      }
+
+      // Generate JWT token for admin without expiration
+      const token = jwt.sign(
+        { id: 'admin-hardcoded-id', role: 'admin', user_id: ADMIN_CREDENTIALS.user_id }, 
+        process.env.JWT_SECRET
+      );
+
+      return res.json({
+        success: true,
+        token,
+        user: {
+          id: 'admin-hardcoded-id',
+          user_id: ADMIN_CREDENTIALS.user_id,
+          name: 'System Administrator',
+          email: 'admin@eauction.com',
+          role: 'admin',
+          company: 'Anunine Holdings Pvt Ltd'
+        }
+      });
+    }
+
+    // Handle bidder login (user_id starts with 'B')
+    if (!user_id.toUpperCase().startsWith('B')) {
+      return res.status(401).json({ success: false, error: 'Invalid user ID format' });
+    }
+
+    // Find bidder in database
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
-      .eq('user_id', user_id)
+      .eq('user_id', user_id.toUpperCase())
       .single();
 
     if (error || !user) {
@@ -28,11 +65,10 @@ const login = async (req, res) => {
       return res.status(403).json({ success: false, error: 'Account is deactivated' });
     }
 
-    // Generate JWT token
+    // Generate JWT token for bidder without expiration
     const token = jwt.sign(
       { id: user.id, role: user.role, user_id: user.user_id }, 
-      process.env.JWT_SECRET,
-      
+      process.env.JWT_SECRET
     );
 
     res.json({ 
@@ -51,6 +87,7 @@ const login = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
 
 const changePassword = async (req, res) => {
   try {
