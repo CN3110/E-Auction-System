@@ -1,200 +1,306 @@
-import React, { useState } from 'react';
-import { TextField, Button, Checkbox, FormControlLabel, TextareaAutosize } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { 
+  TextField, 
+  Button, 
+  Checkbox, 
+  FormControlLabel, 
+  TextareaAutosize, 
+  CircularProgress, 
+  Alert 
+} from '@mui/material';
 import '../../styles/createAuction.css';
 import Card from '../Common/Card';
+import { 
+  fetchActiveBidders, 
+  createAuction 
+} from '../../services/auctionService';
 
 const CreateAuction = () => {
   const [formData, setFormData] = useState({
-    auctionID: '',
     title: '',
-    date: '',
-    time: '',
-    duration: 30,
-    notices: '',
-    bidders: []
+    auction_date: '',
+    start_time: '',
+    duration_minutes: 30,
+    special_notices: '',
+    selected_bidders: []
   });
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [biddersList, setBiddersList] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [biddersLoading, setBiddersLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
-  const biddersList = [
-    { id: "B001", name: "VYS International" },
-    { id: "B002", name: "Techtron Integrated Solutions Pvt Ltd" },
-    { id: "B003", name: "Daylight Data Solutions Pvt Ltd" },
-    { id: "B004", name: "Kamsons Trading Company PVT Ltd" },
-    { id: "B005", name: "Colonial Engineering (Pvt) Ltd" },
-    { id: "B006", name: "Monara Engineering & Trading (Pvt) Ltd" },
-    { id: "B007", name: "Meth G (Private) Limited" },
-    { id: "B008", name: "Nikini Automation Systems (Pvt) Ltd" },
-    { id: "B009", name: "Everbolt Engineering (Pvt) Ltd" }
-  ];
+  useEffect(() => {
+    const loadBidders = async () => {
+      try {
+        setBiddersLoading(true);
+        const data = await fetchActiveBidders();
+        setBiddersList(data.bidders);
+      } catch {
+        setError('Failed to fetch bidders');
+      } finally {
+        setBiddersLoading(false);
+      }
+    };
+    loadBidders();
+  }, []);
 
   const filteredBidders = biddersList.filter(bidder =>
-    bidder.name.toLowerCase().includes(searchTerm.toLowerCase())
+    bidder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    bidder.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    bidder.user_id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    if (error) setError('');
+    if (success) setSuccess('');
   };
 
   const handleCheckboxChange = (e) => {
     const { checked, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      bidders: checked
-        ? [...prev.bidders, value]
-        : prev.bidders.filter(b => b !== value)
+      selected_bidders: checked
+        ? [...prev.selected_bidders, value]
+        : prev.selected_bidders.filter(b => b !== value)
     }));
   };
 
   const handleSelectAll = (e) => {
     const { checked } = e.target;
-    const filteredNames = filteredBidders.map(bidder => bidder.name);
+    const filteredIds = filteredBidders.map(bidder => bidder.id);
     setFormData(prev => ({
       ...prev,
-      bidders: checked
-        ? [...new Set([...prev.bidders, ...filteredNames])]
-        : prev.bidders.filter(bidder => !filteredNames.includes(bidder))
+      selected_bidders: checked
+        ? [...new Set([...prev.selected_bidders, ...filteredIds])]
+        : prev.selected_bidders.filter(bidderId => !filteredIds.includes(bidderId))
     }));
   };
 
   const isAllSelected =
     filteredBidders.length > 0 &&
-    filteredBidders.every(bidder => formData.bidders.includes(bidder.name));
+    filteredBidders.every(bidder => formData.selected_bidders.includes(bidder.id));
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log('Submitted Auction:', formData);
+    
+    if (!formData.title.trim()) {
+      setError('Auction title is required');
+      return;
+    }
+    
+    if (!formData.auction_date) {
+      setError('Auction date is required');
+      return;
+    }
+    
+    if (!formData.start_time) {
+      setError('Start time is required');
+      return;
+    }
+    
+    if (formData.selected_bidders.length === 0) {
+      setError('Please select at least one bidder');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      setError('');
+      setSuccess('');
+      
+      const data = await createAuction(formData);
+      
+      setSuccess(`Auction "${formData.title}" created successfully with ID: ${data.auction_id}`);
+      setFormData({
+        title: '',
+        auction_date: '',
+        start_time: '',
+        duration_minutes: 30,
+        special_notices: '',
+        selected_bidders: []
+      });
+      setSearchTerm('');
+    } catch (error) {
+      setError(error.message || 'Failed to create auction. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
+  if (biddersLoading) {
+    return (
+      <div className="container my-4 text-center">
+        <CircularProgress />
+        <p className="mt-2">Loading bidders...</p>
+      </div>
+    );
+  }
+
   return (
-    <div>
-    
     <div className="container my-1">
-            <Card>
+      <Card>
+        {error && (
+          <Alert severity="error" className="mb-3" onClose={() => setError('')}>
+            {error}
+          </Alert>
+        )}
+        
+        {success && (
+          <Alert severity="success" className="mb-3" onClose={() => setSuccess('')}>
+            {success}
+          </Alert>
+        )}
 
-      <form onSubmit={handleSubmit}>
-        <div className="row mb-3">
-          <div className="col-md-6">
-            <TextField
-              fullWidth
-              label="Auction Title"
-              name="title"
-              value={formData.title}
-              onChange={handleChange}
-              required
-            />
-          </div>
-          <div className="col-md-6">
-            <TextField
-              fullWidth
-              type="date"
-              name="date"
-              label="Auction Date"
-              value={formData.date}
-              onChange={handleChange}
-              InputLabelProps={{ shrink: true }}
-              required
-            />
-          </div>
-        </div>
-
-        <div className="row mb-3">
-          <div className="col-md-6">
-            <TextField
-              fullWidth
-              type="time"
-              name="time"
-              label="Start Time"
-              value={formData.time}
-              onChange={handleChange}
-              InputLabelProps={{ shrink: true }}
-              required
-            />
-          </div>
-          <div className="col-md-6">
-            <TextField
-              fullWidth
-              type="number"
-              name="duration"
-              label="Duration (minutes)"
-              value={formData.duration}
-              onChange={handleChange}
-              required
-            />
-          </div>
-        </div>
-
-        <div className="mb-3">
-          <label className="form-label">Special Notices</label>
-          <TextareaAutosize
-            minRows={3}
-            name="notices"
-            value={formData.notices}
-            onChange={handleChange}
-            className="form-control"
-            placeholder="Enter any special instructions or notices"
-          />
-        </div>
-
-        {/* Bidders Selection */}
-        <div className="mb-4">
-          <label className="form-label">Select Bidders</label>
-          <div className="card p-3">
-            <div className="d-flex flex-column flex-md-row mb-3 gap-2">
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Search bidders..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={isAllSelected}
-                    onChange={handleSelectAll}
-                  />
-                }
-                label={`Select All (${filteredBidders.length})`}
+        <form onSubmit={handleSubmit}>
+          
+          <div className="row mb-3">
+            <div className="col-md-6">
+              <TextField
+                fullWidth
+                label="Auction Title"
+                name="title"
+                value={formData.title}
+                onChange={handleChange}
+                required
+                disabled={loading}
               />
             </div>
+            <div className="col-md-6">
+              <TextField
+                fullWidth
+                type="date"
+                name="auction_date"
+                label="Auction Date"
+                value={formData.auction_date}
+                onChange={handleChange}
+                InputLabelProps={{ shrink: true }}
+                required
+                disabled={loading}
+                inputProps={{
+                  min: new Date().toISOString().split('T')[0] // Prevent past dates
+                }}
+              />
+            </div>
+          </div>
 
-            <div className="bidders-scroll-box border rounded p-2" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-              {filteredBidders.length > 0 ? (
-                filteredBidders.map(bidder => (
-                  <div key={bidder.id} className="form-check mb-2">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id={bidder.id}
-                      value={bidder.name}
-                      checked={formData.bidders.includes(bidder.name)}
-                      onChange={handleCheckboxChange}
+          <div className="row mb-3">
+            <div className="col-md-6">
+              <TextField
+                fullWidth
+                type="time"
+                name="start_time"
+                label="Start Time"
+                value={formData.start_time}
+                onChange={handleChange}
+                InputLabelProps={{ shrink: true }}
+                required
+                disabled={loading}
+              />
+            </div>
+            <div className="col-md-6">
+              <TextField
+                fullWidth
+                type="number"
+                name="duration_minutes"
+                label="Duration (minutes)"
+                value={formData.duration_minutes}
+                onChange={handleChange}
+                required
+                disabled={loading}
+                inputProps={{ min: 1, max: 1440 }}
+              />
+            </div>
+          </div>
+
+          <div className="mb-3">
+            <label className="form-label">Special Notices</label>
+            <TextareaAutosize
+              minRows={3}
+              name="special_notices"
+              value={formData.special_notices}
+              onChange={handleChange}
+              className="form-control"
+              placeholder="Enter any special instructions or notices"
+              disabled={loading}
+            />
+          </div>
+
+          {/* Bidders Selection */}
+          <div className="mb-4">
+            <label className="form-label">Select Bidders</label>
+            <div className="card p-3">
+              <div className="d-flex flex-column flex-md-row mb-3 gap-2">
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search bidders by name, company, or ID..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  disabled={loading}
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={isAllSelected}
+                      onChange={handleSelectAll}
+                      disabled={loading || filteredBidders.length === 0}
                     />
-                    <label className="form-check-label" htmlFor={bidder.id}>
-                      {bidder.name}
-                    </label>
+                  }
+                  label={`Select All (${filteredBidders.length})`}
+                />
+              </div>
+
+              <div className="bidders-scroll-box border rounded p-2" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                {filteredBidders.length > 0 ? (
+                  filteredBidders.map(bidder => (
+                    <div key={bidder.id} className="form-check mb-2">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id={bidder.id}
+                        value={bidder.id}
+                        checked={formData.selected_bidders.includes(bidder.id)}
+                        onChange={handleCheckboxChange}
+                        disabled={loading}
+                      />
+                      <label className="form-check-label" htmlFor={bidder.id}>
+                        <div>
+                          <strong>{bidder.name}</strong> ({bidder.user_id})
+                          {bidder.company && <div className="text-muted small">{bidder.company}</div>}
+                        </div>
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-muted text-center">
+                    {searchTerm ? 'No bidders found matching your search' : 'No active bidders available'}
                   </div>
-                ))
-              ) : (
-                <div className="text-muted text-center">No bidders found</div>
-              )}
-            </div>
-            <div className="text-end text-secondary mt-2">
-              {formData.bidders.length} of {biddersList.length} bidders selected
+                )}
+              </div>
+              <div className="text-end text-secondary mt-2">
+                {formData.selected_bidders.length} of {biddersList.length} bidders selected
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="text-center">
-          <Button variant="contained" color="warning" type="submit">
-            Create Auction
-          </Button>
-        </div>
-      </form>
+          <div className="text-center">
+            <Button 
+              variant="contained" 
+              color="warning" 
+              type="submit"
+              disabled={loading}
+              startIcon={loading ? <CircularProgress size={20} /> : null}
+            >
+              {loading ? 'Creating Auction...' : 'Create Auction'}
+            </Button>
+          </div>
+        </form>
       </Card>
-    </div>
     </div>
   );
 };

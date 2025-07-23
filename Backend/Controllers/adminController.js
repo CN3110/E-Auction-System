@@ -241,6 +241,31 @@ const reactivateBidder = async (req, res) => {
   }
 };
 
+// Get active bidders for auction creation - when selecting only active bidders
+const getActiveBidders = async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('*')
+      .eq('role', 'bidder')
+      .eq('is_active', true)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    
+    res.json({ 
+      success: true,
+      bidders: data
+    });
+  } catch (error) {
+    console.error('Error fetching active bidders:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+};
 
 
 const testDbConnection = async (req, res) => {
@@ -274,5 +299,6 @@ module.exports = {
   updateBidderStatus,
   deactivateBidder,
   reactivateBidder,
+  getActiveBidders,
   testDbConnection
 };

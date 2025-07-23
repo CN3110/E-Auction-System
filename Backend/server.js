@@ -32,7 +32,7 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', require('./Routes/auth'));
 app.use('/api/admin', require('./Routes/admin'));
-//app.use('/api/auction', require('./src/routes/auction'));
+app.use('/api/auction', require('./Routes/auctionRoutes'));
 //app.use('/api/bidder', require('./src/routes/bidder'));
 
 console.log("Admin routes path:", require.resolve('./Routes/admin'));
