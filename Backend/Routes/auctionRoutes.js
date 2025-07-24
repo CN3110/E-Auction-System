@@ -1,7 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { 
-  createAuction
+  createAuction,
+  getLiveAuction,
+  getAllAuctions,
+  getAuction,
+  getLiveRankings
+
   } = require('../Controllers/auctionController');
 const { authenticateToken, requireAdmin, requireBidder } = require('../Middleware/auth');
 
@@ -9,16 +14,17 @@ const { authenticateToken, requireAdmin, requireBidder } = require('../Middlewar
 router.post('/create', createAuction);
 
 
-// Get my auctions (bidder only)
-//router.get('/my-auctions', authenticateToken, requireBidder, getMyAuctions);
+/// Get live auction for current bidder
+router.get('/live', authenticateToken, requireBidder, getLiveAuction);
 
-// Get all auctions
-//router.get('/', authenticateToken, getAllAuctions);
+// Get all auctions (admin can see all, bidders see only their invited ones)
+router.get('/', getAllAuctions);
 
 // Get specific auction details
-//router.get('/:auctionId', authenticateToken, getAuction);
+router.get('/:auctionId', getAuction);
 
 // Get live rankings for an auction
-//router.get('/:auctionId/rankings', authenticateToken, getLiveRankings);
+router.get('/:auctionId/rankings', getLiveRankings);
+
 
 module.exports = router;

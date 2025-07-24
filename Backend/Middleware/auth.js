@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const supabase = require('../Config/database').supabaseClient;
+const { supabaseClient } = require('../Config/database');
 
 const authenticate = async (req, res, next) => {
   try {
@@ -10,14 +10,16 @@ const authenticate = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const { data: user, error } = await supabase
+    const { data: user, error } = await supabaseClient
       .from('users')
       .select('*')
       .eq('id', decoded.id)
+      .eq('is_active', true)
+      .is('deleted_at', null)
       .single();
 
     if (error || !user) {
-      throw new Error('User not found');
+      throw new Error('User not found or inactive');
     }
 
     req.user = user;
@@ -39,4 +41,15 @@ const authorizeRoles = (...roles) => {
   };
 };
 
-module.exports = { authenticate, authorizeRoles };
+// Legacy middleware names for backward compatibility
+const authenticateToken = authenticate;
+const requireAdmin = authorizeRoles('admin');
+const requireBidder = authorizeRoles('bidder');
+
+module.exports = { 
+  authenticate, 
+  authorizeRoles,
+  authenticateToken,
+  requireAdmin,
+  requireBidder
+};
