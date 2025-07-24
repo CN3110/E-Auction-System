@@ -85,7 +85,7 @@ const registerBidder = async (req, res) => {
       console.error('Email failed to send:', emailResult.error);
     }
     
-    await sendEmail(email, 'E-Auction Account Created', emailHTML);
+    //await sendEmail(email, 'E-Auction Account Created', emailHTML);
     
     res.json({
       success: true,
