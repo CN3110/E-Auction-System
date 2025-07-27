@@ -1,27 +1,26 @@
 const express = require('express');
 const router = express.Router();
-const { 
+const {
+  getCurrentAuction,
   placeBid,
-  getLatestBid,
   getBidderRank,
-  getAuctionBids,
-  getBidderHistory
+  getMinBidAmount,
+  getAuctionHistory
 } = require('../Controllers/bidController');
-const { authenticate, authorizeRoles } = require('../Middleware/auth');
 
-// Place a new bid (bidders only)
-router.post('/', placeBid);
+// Get current live or upcoming auction
+router.get('/current-auction', getCurrentAuction);
 
-// Get latest bid for current bidder in a specific auction
-router.get('/latest', getLatestBid);
+// Place a bid
+router.post('/place', placeBid);
 
-// Get bidder's rank in a specific auction
-router.get('/rank', getBidderRank);
+// Get bidder rank for specific auction
+router.get('/rank/:auctionId', getBidderRank);
 
-// Get all bids for an auction (admin only)
-router.get('/auction/:auctionId', getAuctionBids);
+// Get minimum bid amount for auction
+router.get('/min-amount/:auctionId', getMinBidAmount);
 
-// Get bidder's auction history
-router.get('/history', getBidderHistory);
+// Get auction history for bidder
+router.get('/history', getAuctionHistory);
 
 module.exports = router;
