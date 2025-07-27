@@ -16,6 +16,10 @@ if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey) {
 }
 
 // Create Supabase clients
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+
 // Admin client: Can bypass Row Level Security, use for admin operations
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -44,6 +48,7 @@ async function testConnection() {
 }
 
 module.exports = {
+    supabase,
     supabaseAdmin,  // This is the admin client
   supabaseClient, // This is the public client
     testConnection

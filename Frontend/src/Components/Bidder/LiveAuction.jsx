@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Card from '../Common/Card';
 import Alert from '../Common/Alert';
-import { getCurrentAuction, placeBid, getBidderRank, getMinBidAmount } from '../../services/bidService';
+import { getLiveAuctions, placeBid, getBidderRank, getMinBidAmount } from '../../services/bidService';
 
 const LiveAuction = () => {
   const [bidAmount, setBidAmount] = useState('');
@@ -14,6 +14,7 @@ const LiveAuction = () => {
   });
   const [timeLeft, setTimeLeft] = useState('00:00');
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
     fetchAuctionData();
@@ -51,29 +52,54 @@ const LiveAuction = () => {
 
   const fetchAuctionData = async () => {
     try {
-      const [auctionData, rankData, minBid] = await Promise.all([
-        getCurrentAuction(),
-        getBidderRank(),
-        getMinBidAmount()
-      ]);
-      
+      // Get current auction first
+      const auctionData = await getLiveAuctions();
       setAuction(auctionData);
-      setBidderInfo({
-        rank: rankData.rank,
-        latestBid: rankData.latestBid,
-        minBidAmount: minBid
-      });
       
-      // Set minimum bid amount as default
-      setBidAmount(minBid.toString());
+      if (auctionData && auctionData.id) {
+        // Get bidder rank and minimum bid for this auction
+        const [rankData, minBid] = await Promise.all([
+          getBidderRank(auctionData.id),
+          getMinBidAmount(auctionData.id)
+        ]);
+        
+        setBidderInfo({
+          rank: rankData.rank,
+          latestBid: rankData.latestBid,
+          minBidAmount: minBid
+        });
+        
+        // Set a reasonable default bid amount
+        if (!bidAmount) {
+          setBidAmount((minBid || 1).toString());
+        }
+      } else {
+        // No auction available
+        setBidderInfo({
+          rank: null,
+          latestBid: null,
+          minBidAmount: 0
+        });
+      }
+      
     } catch (error) {
+      console.error('Error fetching auction data:', error);
       showAlert('Error fetching auction data', 'danger');
+    } finally {
+      setInitialLoading(false);
     }
   };
 
   const handlePlaceBid = async () => {
-    if (!bidAmount || parseFloat(bidAmount) < bidderInfo.minBidAmount) {
-      showAlert(`Minimum bid amount is LKR ${bidderInfo.minBidAmount.toLocaleString()}`, 'danger');
+    const bidValue = parseFloat(bidAmount);
+    
+    if (!bidValue || bidValue <= 0) {
+      showAlert('Please enter a valid bid amount', 'danger');
+      return;
+    }
+
+    if (bidValue < bidderInfo.minBidAmount && bidderInfo.minBidAmount > 0) {
+      showAlert(`Bid amount must be less than LKR ${bidderInfo.minBidAmount.toLocaleString()}`, 'danger');
       return;
     }
 
@@ -84,7 +110,7 @@ const LiveAuction = () => {
 
     setLoading(true);
     try {
-      const result = await placeBid(auction.auction_id, parseFloat(bidAmount));
+      await placeBid(auction.id, bidValue);
       showAlert('Bid placed successfully!', 'success');
       
       // Refresh data after successful bid
@@ -114,7 +140,7 @@ const LiveAuction = () => {
     });
   };
 
-  if (!auction) {
+  if (initialLoading) {
     return (
       <div className="live-auction">
         <div className="text-center p-4">
@@ -122,6 +148,20 @@ const LiveAuction = () => {
             <span className="visually-hidden">Loading...</span>
           </div>
           <p className="mt-2">Loading auction data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!auction) {
+    return (
+      <div className="live-auction">
+        <div className="text-center p-4">
+          <div className="alert alert-info">
+            <h4>No Active Auctions</h4>
+            <p>There are currently no auctions available for you to participate in.</p>
+            <p>Please check back later or contact the administrator if you believe this is an error.</p>
+          </div>
         </div>
       </div>
     );
@@ -138,12 +178,15 @@ const LiveAuction = () => {
         
         <Card title="Auction Details">
           <p><strong>Title:</strong> {auction.title}</p>
+          <p><strong>Auction ID:</strong> {auction.auction_id}</p>
           <p><strong>Start Date:</strong> {formatDateTime(auction.auction_date, auction.start_time)}</p>
           <p><strong>Duration:</strong> {auction.duration_minutes} minutes</p>
           {auction.special_notices && (
             <div>
               <strong>Special Notices:</strong>
-              <p>{auction.special_notices}</p>
+              <div className="alert alert-info mt-2 small">
+                {auction.special_notices}
+              </div>
             </div>
           )}
         </Card>
@@ -160,11 +203,12 @@ const LiveAuction = () => {
           <p>Check your auction history for results.</p>
         </div>
         
-        <Card title="Auction Details">
+        <Card title="Auction Results">
           <p><strong>Title:</strong> {auction.title}</p>
+          <p><strong>Auction ID:</strong> {auction.auction_id}</p>
           <p><strong>Duration:</strong> {auction.duration_minutes} minutes</p>
           <p><strong>Your Final Rank:</strong> {bidderInfo.rank || 'N/A'}</p>
-          <p><strong>Your Lastest Bid:</strong> {bidderInfo.latestBid ? `LKR ${bidderInfo.latestBid.toLocaleString()}` : 'No bids placed'}</p>
+          <p><strong>Your Latest Bid:</strong> {bidderInfo.latestBid ? `LKR ${bidderInfo.latestBid.toLocaleString()}` : 'No bids placed'}</p>
         </Card>
       </div>
     );
@@ -186,7 +230,7 @@ const LiveAuction = () => {
               <p className="mb-2">
                 <strong>Your Current Rank:</strong> 
                 <span className={`badge ms-2 ${bidderInfo.rank === 1 ? 'bg-success' : bidderInfo.rank <= 3 ? 'bg-warning' : 'bg-secondary'}`}>
-                  {bidderInfo.rank ? `#${bidderInfo.rank}` : 'No rank'}
+                  {bidderInfo.rank ? `#${bidderInfo.rank}` : 'No rank yet'}
                 </span>
               </p>
               <p className="mb-2">
@@ -195,12 +239,14 @@ const LiveAuction = () => {
                   {bidderInfo.latestBid ? `LKR ${bidderInfo.latestBid.toLocaleString()}` : 'No bids yet'}
                 </span>
               </p>
-              <p className="mb-3">
-                <strong>Minimum Bid:</strong> 
-                <span className="fw-bold text-primary ms-2">
-                  LKR {bidderInfo.minBidAmount.toLocaleString()}
-                </span>
-              </p>
+              {bidderInfo.minBidAmount > 0 && (
+                <p className="mb-3">
+                  <strong>To Lead:</strong> 
+                  <span className="fw-bold text-primary ms-2">
+                    Bid below LKR {bidderInfo.minBidAmount.toLocaleString()}
+                  </span>
+                </p>
+              )}
             </div>
             
             <div className="bid-input">
@@ -212,7 +258,7 @@ const LiveAuction = () => {
                   value={bidAmount}
                   onChange={(e) => setBidAmount(e.target.value)}
                   placeholder="Enter bid amount" 
-                  min={bidderInfo.minBidAmount}
+                  min="0"
                   step="0.01"
                   disabled={loading}
                 />

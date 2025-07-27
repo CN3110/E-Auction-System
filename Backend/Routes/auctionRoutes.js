@@ -2,38 +2,26 @@ const express = require('express');
 const router = express.Router();
 const { 
   createAuction,
+  getLiveAuction,
   getAllAuctions,
-  getBidderAuctions,
-  getBidderUpcomingAuctions,
-  getBidderLiveAuctions,
-  getAuctionById,
-  updateAuctionStatus
+  getAuction,
+  getLiveRankings
 } = require('../Controllers/auctionController');
-//const { authenticateToken, requireAdmin, requireBidder } = require('../Middleware/auth');
+const { authenticateToken, requireAdmin, requireBidder } = require('../Middleware/auth');
 
 // Create auction (admin only)
 router.post('/create', createAuction);
 
-// Get all auctions (admin view)
-router.get('/all', getAllAuctions);
+// Get live auction for current bidder (FIXED: Added proper auth)
+router.get('/live', authenticateToken, requireBidder, getLiveAuction);
 
-// Get auctions for specific bidder
-router.get('/bidder/:bidderId', getBidderAuctions);
-router.get('/bidder', getBidderAuctions); // Using query parameter
+// Get all auctions (admin can see all, bidders see only their invited ones)
+router.get('/', authenticateToken, getAllAuctions);
 
-// Get upcoming auctions for bidder
-router.get('/upcoming', getBidderUpcomingAuctions);
+// Get specific auction details
+router.get('/:auctionId', authenticateToken, getAuction);
 
-// Get live auctions for bidder
-router.get('/live', getBidderLiveAuctions);
-
-// Get specific auction by ID
-router.get('/:auctionId', getAuctionById);
-
-// Update auction status (admin)
-router.put('/:auctionId/status', updateAuctionStatus);
-
-// Default route - get bidder auctions
-router.get('/', getBidderAuctions);
+// Get live rankings for an auction (FIXED: Added auth)
+router.get('/:auctionId/rankings', authenticateToken, getLiveRankings);
 
 module.exports = router;

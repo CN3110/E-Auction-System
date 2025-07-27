@@ -1,17 +1,26 @@
 const API_BASE_URL = 'http://localhost:5000/api';
 
+// Helper to get logged-in bidder's user_id
+const getLoggedInBidderId = () => {
+  try {
+    const user = JSON.parse(localStorage.getItem('user'));
+    return user?.user_id || null;
+  } catch (error) {
+    console.error('Error reading user from localStorage:', error);
+    return null;
+  }
+};
+
 // Get current auction (live or upcoming)
 export const getCurrentAuction = async () => {
   try {
     const response = await fetch(`${API_BASE_URL}/bid/current-auction`);
     
     if (!response.ok) {
-      if (response.status === 404) {
-        return null; // No auctions found
-      }
+      if (response.status === 404) return null;
       throw new Error('Failed to fetch current auction');
     }
-    
+
     return await response.json();
   } catch (error) {
     console.error('Error fetching current auction:', error);
@@ -22,24 +31,19 @@ export const getCurrentAuction = async () => {
 // Place a bid
 export const placeBid = async (auctionId, amount) => {
   try {
+    const bidderId = getLoggedInBidderId();
+    if (!bidderId) throw new Error('Bidder ID not found in localStorage');
+
     const response = await fetch(`${API_BASE_URL}/bid/place`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        auctionId,
-        amount,
-        bidderId: 'temp-bidder-1' // For testing without auth
-      }),
+      body: JSON.stringify({ auctionId, amount, bidderId }),
     });
 
     const data = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(data.message || 'Failed to place bid');
-    }
-    
+    if (!response.ok) throw new Error(data.message || 'Failed to place bid');
     return data;
   } catch (error) {
     console.error('Error placing bid:', error);
@@ -50,18 +54,12 @@ export const placeBid = async (auctionId, amount) => {
 // Get bidder rank for current auction
 export const getBidderRank = async () => {
   try {
-    // First get current auction
     const auction = await getCurrentAuction();
-    if (!auction) {
-      return { rank: null, latestBid: null };
-    }
+    const bidderId = getLoggedInBidderId();
+    if (!auction || !bidderId) return { rank: null, latestBid: null };
 
-    const response = await fetch(`${API_BASE_URL}/bid/rank/${auction.auction_id}?bidderId=temp-bidder-1`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch bidder rank');
-    }
-    
+    const response = await fetch(`${API_BASE_URL}/bid/rank/${auction.auction_id}?bidderId=${bidderId}`);
+    if (!response.ok) throw new Error('Failed to fetch bidder rank');
     return await response.json();
   } catch (error) {
     console.error('Error fetching bidder rank:', error);
@@ -72,35 +70,28 @@ export const getBidderRank = async () => {
 // Get minimum bid amount
 export const getMinBidAmount = async () => {
   try {
-    // First get current auction
     const auction = await getCurrentAuction();
-    if (!auction) {
-      return 1; // Default minimum
-    }
+    if (!auction) return 1;
 
     const response = await fetch(`${API_BASE_URL}/bid/min-amount/${auction.auction_id}`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch minimum bid amount');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch minimum bid amount');
+
     const data = await response.json();
     return data.minBidAmount || 1;
   } catch (error) {
     console.error('Error fetching minimum bid amount:', error);
-    return 1; // Default fallback
+    return 1;
   }
 };
 
 // Get auction history
 export const getAuctionHistory = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/bid/history?bidderId=temp-bidder-1`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch auction history');
-    }
-    
+    const bidderId = getLoggedInBidderId();
+    if (!bidderId) return [];
+
+    const response = await fetch(`${API_BASE_URL}/bid/history?bidderId=${bidderId}`);
+    if (!response.ok) throw new Error('Failed to fetch auction history');
     return await response.json();
   } catch (error) {
     console.error('Error fetching auction history:', error);
@@ -109,14 +100,13 @@ export const getAuctionHistory = async () => {
 };
 
 // Get all auctions for a specific bidder (only invited auctions)
-export const getBidderAuctions = async (bidderId = 'temp-bidder-1') => {
+export const getBidderAuctions = async () => {
   try {
+    const bidderId = getLoggedInBidderId();
+    if (!bidderId) return [];
+
     const response = await fetch(`${API_BASE_URL}/auction?bidderId=${bidderId}`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch bidder auctions');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch bidder auctions');
     return await response.json();
   } catch (error) {
     console.error('Error fetching bidder auctions:', error);
@@ -128,11 +118,7 @@ export const getBidderAuctions = async (bidderId = 'temp-bidder-1') => {
 export const getAllAuctions = async () => {
   try {
     const response = await fetch(`${API_BASE_URL}/auction/all`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch auctions');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch auctions');
     return await response.json();
   } catch (error) {
     console.error('Error fetching auctions:', error);
@@ -141,14 +127,13 @@ export const getAllAuctions = async () => {
 };
 
 // Get upcoming auctions for bidder
-export const getUpcomingAuctions = async (bidderId = 'temp-bidder-1') => {
+export const getUpcomingAuctions = async () => {
   try {
+    const bidderId = getLoggedInBidderId();
+    if (!bidderId) return [];
+
     const response = await fetch(`${API_BASE_URL}/auction/upcoming?bidderId=${bidderId}`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch upcoming auctions');
-    }
-    
+    if (!response.ok) throw new Error('Failed to fetch upcoming auctions');
     return await response.json();
   } catch (error) {
     console.error('Error fetching upcoming auctions:', error);
@@ -157,17 +142,24 @@ export const getUpcomingAuctions = async (bidderId = 'temp-bidder-1') => {
 };
 
 // Get live auctions for bidder
-export const getLiveAuctions = async (bidderId = 'temp-bidder-1') => {
+export const getLiveAuctions = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/auction/live?bidderId=${bidderId}`);
-    
+    const token = localStorage.getItem('token');
+
+    const response = await fetch(`${API_BASE_URL}/auction/live`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
     if (!response.ok) {
       throw new Error('Failed to fetch live auctions');
     }
-    
+
     return await response.json();
   } catch (error) {
     console.error('Error fetching live auctions:', error);
     return [];
   }
 };
+

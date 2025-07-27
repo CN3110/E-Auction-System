@@ -11,8 +11,8 @@ const createAuction = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
-    // Get last auction ID
-    const { data: lastAuction, error: lastAuctionError } = await supabase
+    // Get last auction ID - FIXED: Use supabaseAdmin
+    const { data: lastAuction, error: lastAuctionError } = await supabaseAdmin
       .from('auctions')
       .select('auction_id')
       .order('auction_id', { ascending: false })
@@ -22,38 +22,36 @@ const createAuction = async (req, res) => {
     
     const auctionId = generateAuctionId(lastAuction?.[0]?.auction_id);
     
-    // Create auction with explicit field selection
-    // Create auction without created_by
-const { data: auction, error: auctionError } = await supabase
-  .from('auctions')
-  .insert([{
-    auction_id: auctionId,
-    title,
-    auction_date,
-    start_time,
-    duration_minutes,
-    special_notices
-  }])
-  .select('id, auction_id')
-  .single();
+    // Create auction - FIXED: Use supabaseAdmin
+    const { data: auction, error: auctionError } = await supabaseAdmin
+      .from('auctions')
+      .insert([{
+        auction_id: auctionId,
+        title,
+        auction_date,
+        start_time,
+        duration_minutes,
+        special_notices
+      }])
+      .select('id, auction_id')
+      .single();
 
-    
     if (auctionError) throw auctionError;
     
     // Add selected bidders
     const bidderInvites = selected_bidders.map(bidderId => ({
-      auction_id: auction.id,  // Now using the correct ID
+      auction_id: auction.id,
       bidder_id: bidderId
     }));
     
-    const { error: biddersError } = await supabase
+    const { error: biddersError } = await supabaseAdmin
       .from('auction_bidders')
       .insert(bidderInvites);
     
     if (biddersError) throw biddersError;
     
     // Send emails to selected bidders
-    const { data: bidders } = await supabase
+    const { data: bidders } = await supabaseAdmin
       .from('users')
       .select('email, name')
       .in('id', selected_bidders)
@@ -85,241 +83,281 @@ const { data: auction, error: auctionError } = await supabase
   }
 };
 
-// Get all auctions (admin view - all auctions)
+// Get live auction for a specific bidder - FIXED: Improved logic
+const getLiveAuction = async (req, res) => {
+  try {
+    const bidderId = req.user.id;
+    const now = new Date();
+    const currentDate = now.toISOString().split('T')[0];
+    const currentTime = now.toTimeString().split(' ')[0];
+
+    if (!bidderId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing bidder ID'
+      });
+    }
+
+    // 1. First check for currently live auctions for this bidder
+    const { data: liveAuction, error: liveError } = await supabaseAdmin
+      .from('auctions')
+      .select(`
+        *,
+        auction_bidders!inner(bidder_id)
+      `)
+      .eq('auction_bidders.bidder_id', bidderId)
+      .eq('status', 'live')
+      .single();
+
+    if (liveError && liveError.code !== 'PGRST116') {
+      console.error('Get live auction error:', liveError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch live auction'
+      });
+    }
+
+    let auctionToReturn = liveAuction;
+
+    // 2. If no live auction, check if a scheduled one should be live now
+    if (!liveAuction) {
+      const { data: scheduledAuction, error: scheduledError } = await supabaseAdmin
+        .from('auctions')
+        .select(`
+          *,
+          auction_bidders!inner(bidder_id)
+        `)
+        .eq('auction_bidders.bidder_id', bidderId)
+        .eq('auction_date', currentDate)
+        .lte('start_time', currentTime)
+        .eq('status', 'scheduled')
+        .single();
+
+      if (scheduledError && scheduledError.code !== 'PGRST116') {
+        console.error('Check scheduled auction error:', scheduledError);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to check scheduled auction'
+        });
+      }
+
+      if (scheduledAuction) {
+        // Update status to 'live'
+        await supabaseAdmin
+          .from('auctions')
+          .update({ status: 'live' })
+          .eq('id', scheduledAuction.id);
+
+        auctionToReturn = { ...scheduledAuction, status: 'live' };
+      }
+    }
+
+    // 3. If still no auction, check for upcoming auctions
+    if (!auctionToReturn) {
+      const { data: upcomingAuction, error: upcomingError } = await supabaseAdmin
+        .from('auctions')
+        .select(`
+          *,
+          auction_bidders!inner(bidder_id)
+        `)
+        .eq('auction_bidders.bidder_id', bidderId)
+        .gte('auction_date', currentDate)
+        .eq('status', 'scheduled')
+        .order('auction_date', { ascending: true })
+        .order('start_time', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (!upcomingError && upcomingAuction) {
+        auctionToReturn = upcomingAuction;
+      }
+    }
+
+    // 4. If still no auction, return null
+    if (!auctionToReturn) {
+      return res.json({
+        success: true,
+        auction: null
+      });
+    }
+
+    // 5. Check if live auction should have ended
+    if (auctionToReturn.status === 'live') {
+      const startTime = new Date(`${auctionToReturn.auction_date}T${auctionToReturn.start_time}`);
+      const endTime = new Date(startTime.getTime() + auctionToReturn.duration_minutes * 60000);
+
+      if (now > endTime) {
+        await endAuction(auctionToReturn.id);
+        return res.json({
+          success: true,
+          auction: { ...auctionToReturn, status: 'ended' }
+        });
+      }
+    }
+
+    // 6. Return valid auction
+    return res.json({
+      success: true,
+      auction: auctionToReturn
+    });
+
+  } catch (error) {
+    console.error('Get live auction error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get all auctions (with filtering)
 const getAllAuctions = async (req, res) => {
   try {
-    const { data: auctions, error } = await supabaseAdmin
-      .from('auctions')
-      .select('*')
-      .order('auction_date', { ascending: true })
-      .order('start_time', { ascending: true });
+    const { status, date } = req.query;
+    const userRole = req.user?.role;
+    const userId = req.user?.id;
+
+    let query;
+
+    if (userRole === 'admin') {
+      // Admin can see all auctions
+      query = supabaseAdmin.from('auctions').select('*');
+    } else {
+      // Bidders can only see auctions they're invited to
+      query = supabaseAdmin
+        .from('auctions')
+        .select(`
+          *,
+          auction_bidders!inner(bidder_id)
+        `)
+        .eq('auction_bidders.bidder_id', userId);
+    }
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    if (date) {
+      query = query.eq('auction_date', date);
+    }
+
+    query = query.order('auction_date', { ascending: false });
+
+    const { data: auctions, error } = await query;
 
     if (error) {
-      console.error('Error fetching auctions:', error);
-      return res.status(500).json({ message: 'Error fetching auctions' });
-    }
-
-    res.json(auctions || []);
-  } catch (error) {
-    console.error('Error in getAllAuctions:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-// Get auctions for a specific bidder (only auctions they're invited to)
-const getBidderAuctions = async (req, res) => {
-  try {
-    const bidderId = req.query.bidderId || req.params.bidderId || 'temp-bidder-1'; // For testing
-
-    // Get bidder info
-    const { data: bidder, error: bidderError } = await supabaseAdmin
-      .from('users')
-      .select('id')
-      .eq('user_id', bidderId)
-      .single();
-
-    if (bidderError || !bidder) {
-      return res.status(404).json({ message: 'Bidder not found' });
-    }
-
-    // Get auctions where this bidder is invited
-    const { data: auctions, error } = await supabaseAdmin
-      .from('auctions')
-      .select(`
-        *,
-        auction_bidders!inner(
-          invited_at
-        )
-      `)
-      .eq('auction_bidders.bidder_id', bidder.id)
-      .order('auction_date', { ascending: true })
-      .order('start_time', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching bidder auctions:', error);
-      return res.status(500).json({ message: 'Error fetching bidder auctions' });
-    }
-
-    // Clean up the response to remove nested auction_bidders data
-    const cleanedAuctions = auctions?.map(auction => {
-      const { auction_bidders, ...cleanAuction } = auction;
-      return {
-        ...cleanAuction,
-        invited_at: auction_bidders[0]?.invited_at
-      };
-    }) || [];
-
-    res.json(cleanedAuctions);
-  } catch (error) {
-    console.error('Error in getBidderAuctions:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-// Get upcoming auctions for a specific bidder
-const getBidderUpcomingAuctions = async (req, res) => {
-  try {
-    const bidderId = req.query.bidderId || 'temp-bidder-1'; // For testing
-
-    // Get bidder info
-    const { data: bidder, error: bidderError } = await supabaseAdmin
-      .from('users')
-      .select('id')
-      .eq('user_id', bidderId)
-      .single();
-
-    if (bidderError || !bidder) {
-      return res.status(404).json({ message: 'Bidder not found' });
-    }
-
-    // Get upcoming auctions where this bidder is invited
-    const { data: auctions, error } = await supabaseAdmin
-      .from('auctions')
-      .select(`
-        *,
-        auction_bidders!inner(
-          invited_at
-        )
-      `)
-      .eq('auction_bidders.bidder_id', bidder.id)
-      .eq('status', 'scheduled')
-      .order('auction_date', { ascending: true })
-      .order('start_time', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching bidder upcoming auctions:', error);
-      return res.status(500).json({ message: 'Error fetching bidder upcoming auctions' });
-    }
-
-    // Clean up the response
-    const cleanedAuctions = auctions?.map(auction => {
-      const { auction_bidders, ...cleanAuction } = auction;
-      return {
-        ...cleanAuction,
-        invited_at: auction_bidders[0]?.invited_at
-      };
-    }) || [];
-
-    res.json(cleanedAuctions);
-  } catch (error) {
-    console.error('Error in getBidderUpcomingAuctions:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-// Get live auctions for a specific bidder
-const getBidderLiveAuctions = async (req, res) => {
-  try {
-    const bidderId = req.query.bidderId || 'temp-bidder-1'; // For testing
-
-    // Get bidder info
-    const { data: bidder, error: bidderError } = await supabaseAdmin
-      .from('users')
-      .select('id')
-      .eq('user_id', bidderId)
-      .single();
-
-    if (bidderError || !bidder) {
-      return res.status(404).json({ message: 'Bidder not found' });
-    }
-
-    // Get live auctions where this bidder is invited
-    const { data: auctions, error } = await supabaseAdmin
-      .from('auctions')
-      .select(`
-        *,
-        auction_bidders!inner(
-          invited_at
-        )
-      `)
-      .eq('auction_bidders.bidder_id', bidder.id)
-      .eq('status', 'live')
-      .order('auction_date', { ascending: true })
-      .order('start_time', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching bidder live auctions:', error);
-      return res.status(500).json({ message: 'Error fetching bidder live auctions' });
-    }
-
-    // Clean up the response
-    const cleanedAuctions = auctions?.map(auction => {
-      const { auction_bidders, ...cleanAuction } = auction;
-      return {
-        ...cleanAuction,
-        invited_at: auction_bidders[0]?.invited_at
-      };
-    }) || [];
-
-    res.json(cleanedAuctions);
-  } catch (error) {
-    console.error('Error in getBidderLiveAuctions:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-// Get auction by ID
-const getAuctionById = async (req, res) => {
-  try {
-    const { auctionId } = req.params;
-
-    const { data: auction, error } = await supabaseAdmin
-      .from('auctions')
-      .select('*')
-      .eq('auction_id', auctionId)
-      .single();
-
-    if (error || !auction) {
-      return res.status(404).json({ message: 'Auction not found' });
-    }
-
-    res.json(auction);
-  } catch (error) {
-    console.error('Error in getAuctionById:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-// Update auction status (for admin use)
-const updateAuctionStatus = async (req, res) => {
-  try {
-    const { auctionId } = req.params;
-    const { status } = req.body;
-
-    if (!['scheduled', 'live', 'ended'].includes(status)) {
-      return res.status(400).json({ message: 'Invalid status' });
-    }
-
-    const { data: auction, error } = await supabaseAdmin
-      .from('auctions')
-      .update({ status, updated_at: new Date() })
-      .eq('auction_id', auctionId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error updating auction status:', error);
-      return res.status(500).json({ message: 'Error updating auction status' });
+      console.error('Get auctions error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch auctions'
+      });
     }
 
     res.json({
-      message: 'Auction status updated successfully',
+      success: true,
+      auctions
+    });
+
+  } catch (error) {
+    console.error('Get all auctions error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get specific auction details
+const getAuction = async (req, res) => {
+  try {
+    const { auctionId } = req.params;
+
+    const { data: auction, error } = await supabaseAdmin
+      .from('auctions')
+      .select(`
+        *,
+        auction_bidders(
+          bidder_id,
+          users(name, company)
+        )
+      `)
+      .eq('id', auctionId)
+      .single();
+
+    if (error) {
+      console.error('Get auction error:', error);
+      return res.status(404).json({
+        success: false,
+        error: 'Auction not found'
+      });
+    }
+
+    res.json({
+      success: true,
       auction
     });
+
   } catch (error) {
-    console.error('Error in updateAuctionStatus:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('Get auction error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get live rankings for an auction - FIXED: Use the database function
+const getLiveRankings = async (req, res) => {
+  try {
+    const { auctionId } = req.params;
+
+    // Use the database function we created
+    const { data: rankings, error } = await supabaseAdmin
+      .rpc('get_auction_leaderboard', { p_auction_id: auctionId });
+
+    if (error) {
+      console.error('Get rankings error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch rankings'
+      });
+    }
+
+    res.json({
+      success: true,
+      rankings: rankings || []
+    });
+
+  } catch (error) {
+    console.error('Get live rankings error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Helper function to end auction
+const endAuction = async (auctionId) => {
+  try {
+    // Use the database function we created
+    const { data: result, error } = await supabaseAdmin
+      .rpc('end_auction', { p_auction_id: auctionId });
+
+    if (error) {
+      console.error('End auction error:', error);
+    }
+
+    return result;
+  } catch (error) {
+    console.error('End auction error:', error);
   }
 };
 
 module.exports = {
   createAuction,
+  getLiveAuction,
   getAllAuctions,
-  getBidderAuctions,
-  getBidderUpcomingAuctions,
-  getBidderLiveAuctions,
-  getUpcomingAuctions: getBidderUpcomingAuctions, // Alias for backward compatibility
-  getLiveAuctions: getBidderLiveAuctions, // Alias for backward compatibility
-  getAuctionById,
-  updateAuctionStatus
+  getAuction,
+  getLiveRankings
 };
