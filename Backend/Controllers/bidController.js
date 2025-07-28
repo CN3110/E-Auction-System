@@ -1,99 +1,83 @@
 const { supabaseAdmin } = require('../Config/database');
 
-// Place a new bid
+//place a bid 
 const placeBid = async (req, res) => {
-  try {
-    const { auctionId, amount } = req.body;
-    const bidderId = req.user.id;
+    const { amount } = req.body;
+    const { auction } = req; // Assuming auction is attached by previous middleware
+    const bidder_id = req.user.id; // From authentication middleware
 
-    // Validate input
-    if (!auctionId || !amount || amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid bid amount or auction ID'
-      });
+    if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
+        return res.status(400).json({ 
+            error: 'Please enter a valid positive bid amount' 
+        });
     }
 
-    // Check if auction exists and is live
-    const { data: auction, error: auctionError } = await supabaseAdmin
-      .from('auctions')
-      .select('*')
-      .eq('id', auctionId)
-      .single();
+    const client = await pool.connect();
 
-    if (auctionError || !auction) {
-      return res.status(404).json({
-        success: false,
-        error: 'Auction not found'
-      });
+    try {
+        await client.query('BEGIN');
+
+        // Check current lowest bid (for reverse auction)
+        const currentBids = await client.query(
+            `SELECT MIN(amount) as current_lowest 
+             FROM bids 
+             WHERE auction_id = $1`,
+            [auction.id]
+        );
+
+        const currentLowest = currentBids.rows[0]?.current_lowest;
+        
+        // Reverse auction validation (lowest bid wins)
+        if (currentLowest && parseFloat(amount) >= currentLowest) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ 
+                error: `Your bid must be lower than ${currentLowest.toLocaleString('en-US', {
+                    style: 'currency',
+                    currency: 'LKR'
+                })}`
+            });
+        }
+
+        // Insert the new bid
+        const newBid = await client.query(
+            `INSERT INTO bids (id, auction_id, bidder_id, amount) 
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
+            [uuidv4(), auction.id, bidder_id, amount]
+        );
+
+        // Get updated rank
+        const rankResult = await client.query(
+            'SELECT * FROM get_bidder_rank($1, $2, $3)',
+            [auction.id, bidder_id, amount]
+        );
+
+        await client.query('COMMIT');
+
+        res.status(201).json({
+            message: 'Bid placed successfully',
+            bid: newBid.rows[0],
+            rank: rankResult.rows[0]?.rank || null,
+            currentLowest: amount // The new bid becomes the current lowest
+        });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        
+        if (error.code === '23505') { // Unique violation
+            return res.status(400).json({ 
+                error: 'Duplicate bid detected' 
+            });
+        }
+        
+        console.error('Bid placement error:', error);
+        res.status(500).json({ 
+            error: 'Failed to process bid',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    } finally {
+        client.release();
     }
-
-    if (auction.status !== 'live') {
-      return res.status(400).json({
-        success: false,
-        error: 'Auction is not currently live'
-      });
-    }
-
-    // Check if auction time has expired
-    const now = new Date();
-    const startTime = new Date(`${auction.auction_date}T${auction.start_time}`);
-    const endTime = new Date(startTime.getTime() + auction.duration_minutes * 60000);
-    
-    if (now > endTime) {
-      return res.status(400).json({
-        success: false,
-        error: 'Auction time has expired'
-      });
-    }
-
-    // Check if bidder is invited to this auction
-    const { data: invitation, error: inviteError } = await supabaseAdmin
-      .from('auction_bidders')
-      .select('*')
-      .eq('auction_id', auctionId)
-      .eq('bidder_id', bidderId)
-      .single();
-
-    if (inviteError || !invitation) {
-      return res.status(403).json({
-        success: false,
-        error: 'You are not invited to this auction'
-      });
-    }
-
-    // Place the bid
-    const { data: bid, error: bidError } = await supabaseAdmin
-      .from('bids')
-      .insert({
-        auction_id: auctionId,
-        bidder_id: bidderId,
-        amount: parseFloat(amount)
-      })
-      .select()
-      .single();
-
-    if (bidError) {
-      console.error('Place bid error:', bidError);
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to place bid'
-      });
-    }
-
-    res.status(201).json({
-      success: true,
-      message: 'Bid placed successfully',
-      bid
-    });
-
-  } catch (error) {
-    console.error('Place bid error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
-  }
 };
 
 // Get latest bid for a bidder in a specific auction

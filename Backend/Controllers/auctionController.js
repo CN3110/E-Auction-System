@@ -1,6 +1,8 @@
 const { supabaseAdmin } = require('../Config/database');
+const { supabaseClient } = require('../Config/database');
 const { generateAuctionId } = require('../Utils/generators');
 const { sendEmail } = require('../Config/email');
+const moment = require('moment-timezone');
 
 const createAuction = async (req, res) => {
   try {
@@ -83,130 +85,42 @@ const createAuction = async (req, res) => {
   }
 };
 
-// Get live auction for a specific bidder - FIXED: Improved logic
+// Get live auction for current bidder
 const getLiveAuction = async (req, res) => {
   try {
     const bidderId = req.user.id;
-    const now = new Date();
-    const currentDate = now.toISOString().split('T')[0];
-    const currentTime = now.toTimeString().split(' ')[0];
+    const nowSL = moment().tz('Asia/Colombo');
 
-    if (!bidderId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing bidder ID'
+    // Step 1: Get all auctions the bidder is invited to
+    const { data: invitedAuctions, error } = await supabaseClient
+      .from('auction_bidders')
+      .select('auction_id:auction_id(*)') // get full auction info
+      .eq('bidder_id', bidderId);
+
+    if (error) {
+      throw new Error('Error fetching invited auctions');
+    }
+
+    // Step 2: Filter the invited auctions to only return those that are "currently live"
+    const liveAuctions = invitedAuctions
+      .map(entry => entry.auction_id)
+      .filter(auction => {
+        const startDateTime = moment
+          .tz(`${auction.auction_date} ${auction.start_time}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Colombo');
+        const endDateTime = startDateTime.clone().add(auction.duration_minutes, 'minutes');
+
+        return nowSL.isBetween(startDateTime, endDateTime);
       });
-    }
 
-    // 1. First check for currently live auctions for this bidder
-    const { data: liveAuction, error: liveError } = await supabaseAdmin
-      .from('auctions')
-      .select(`
-        *,
-        auction_bidders!inner(bidder_id)
-      `)
-      .eq('auction_bidders.bidder_id', bidderId)
-      .eq('status', 'live')
-      .single();
-
-    if (liveError && liveError.code !== 'PGRST116') {
-      console.error('Get live auction error:', liveError);
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to fetch live auction'
-      });
-    }
-
-    let auctionToReturn = liveAuction;
-
-    // 2. If no live auction, check if a scheduled one should be live now
-    if (!liveAuction) {
-      const { data: scheduledAuction, error: scheduledError } = await supabaseAdmin
-        .from('auctions')
-        .select(`
-          *,
-          auction_bidders!inner(bidder_id)
-        `)
-        .eq('auction_bidders.bidder_id', bidderId)
-        .eq('auction_date', currentDate)
-        .lte('start_time', currentTime)
-        .eq('status', 'scheduled')
-        .single();
-
-      if (scheduledError && scheduledError.code !== 'PGRST116') {
-        console.error('Check scheduled auction error:', scheduledError);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to check scheduled auction'
-        });
-      }
-
-      if (scheduledAuction) {
-        // Update status to 'live'
-        await supabaseAdmin
-          .from('auctions')
-          .update({ status: 'live' })
-          .eq('id', scheduledAuction.id);
-
-        auctionToReturn = { ...scheduledAuction, status: 'live' };
-      }
-    }
-
-    // 3. If still no auction, check for upcoming auctions
-    if (!auctionToReturn) {
-      const { data: upcomingAuction, error: upcomingError } = await supabaseAdmin
-        .from('auctions')
-        .select(`
-          *,
-          auction_bidders!inner(bidder_id)
-        `)
-        .eq('auction_bidders.bidder_id', bidderId)
-        .gte('auction_date', currentDate)
-        .eq('status', 'scheduled')
-        .order('auction_date', { ascending: true })
-        .order('start_time', { ascending: true })
-        .limit(1)
-        .single();
-
-      if (!upcomingError && upcomingAuction) {
-        auctionToReturn = upcomingAuction;
-      }
-    }
-
-    // 4. If still no auction, return null
-    if (!auctionToReturn) {
-      return res.json({
-        success: true,
-        auction: null
-      });
-    }
-
-    // 5. Check if live auction should have ended
-    if (auctionToReturn.status === 'live') {
-      const startTime = new Date(`${auctionToReturn.auction_date}T${auctionToReturn.start_time}`);
-      const endTime = new Date(startTime.getTime() + auctionToReturn.duration_minutes * 60000);
-
-      if (now > endTime) {
-        await endAuction(auctionToReturn.id);
-        return res.json({
-          success: true,
-          auction: { ...auctionToReturn, status: 'ended' }
-        });
-      }
-    }
-
-    // 6. Return valid auction
-    return res.json({
+    res.status(200).json({
       success: true,
-      auction: auctionToReturn
+      count: liveAuctions.length,
+      auctions: liveAuctions,
     });
 
-  } catch (error) {
-    console.error('Get live auction error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
+  } catch (err) {
+    console.error('Error fetching live auctions:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch live auctions' });
   }
 };
 
@@ -361,3 +275,13 @@ module.exports = {
   getAuction,
   getLiveRankings
 };
+
+
+/* get live auction for admin
+get live auction for biider 
+  get all auctions for admin
+  get all auctions for bidder
+  get live auction details
+  
+
+*/

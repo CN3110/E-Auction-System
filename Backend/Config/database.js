@@ -17,7 +17,15 @@ if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey) {
 
 // Create Supabase clients
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  db: {
+    schema: 'public',
+    // Set the timezone for all queries
+    connection: {
+      timezone: 'Asia/Colombo'
+    }
+  }
+});
 
 
 // Admin client: Can bypass Row Level Security, use for admin operations

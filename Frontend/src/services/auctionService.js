@@ -2,8 +2,12 @@ import axios from 'axios';
 
 const API_URL = 'http://localhost:5000/api';
 
+
+
 // Set up axios defaults
 axios.interceptors.request.use(config => {
+    console.log('Interceptor adding token:', localStorage.getItem('token'));
+
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -37,6 +41,8 @@ export const createAuction = async (auctionData) => {
     throw error;
   }
 };
+
+
 
 // Add more auction-related services as needed
 export default {
