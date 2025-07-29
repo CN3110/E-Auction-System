@@ -4,6 +4,7 @@ const { generateAuctionId } = require('../Utils/generators');
 const { sendEmail } = require('../Config/email');
 const moment = require('moment-timezone');
 
+
 const createAuction = async (req, res) => {
   try {
     const { title, auction_date, start_time, duration_minutes, special_notices, selected_bidders } = req.body;
@@ -268,20 +269,265 @@ const endAuction = async (auctionId) => {
   }
 };
 
+// Get live auctions for admin
+const getAdminLiveAuctions = async (req, res) => {
+  try {
+    const nowSL = moment().tz('Asia/Colombo');
+
+    // Get all auctions
+    const { data: auctions, error } = await supabaseAdmin
+      .from('auctions')
+      .select('*')
+      .order('auction_date', { ascending: false });
+
+    if (error) {
+      console.error('Get admin live auctions error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch auctions'
+      });
+    }
+
+    // Filter for live auctions
+    const liveAuctions = auctions.filter(auction => {
+      const startDateTime = moment
+        .tz(`${auction.auction_date} ${auction.start_time}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Colombo');
+      const endDateTime = startDateTime.clone().add(auction.duration_minutes, 'minutes');
+
+      return nowSL.isBetween(startDateTime, endDateTime);
+    });
+
+    res.json({
+      success: true,
+      auctions: liveAuctions,
+      count: liveAuctions.length
+    });
+
+  } catch (error) {
+    console.error('Get admin live auctions error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get live rankings for specific auction (admin)
+const getAdminAuctionRankings = async (req, res) => {
+  try {
+    const { auctionId } = req.params;
+
+    // Get all bids for this auction with bidder information
+    const { data: allBids, error } = await supabaseAdmin
+      .from('bids')
+      .select(`
+        bidder_id,
+        amount,
+        bid_time,
+        users(
+          user_id,
+          name,
+          company
+        )
+      `)
+      .eq('auction_id', auctionId)
+      .order('bid_time', { ascending: false });
+
+    if (error) {
+      console.error('Get admin auction rankings error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch rankings'
+      });
+    }
+
+    if (!allBids || allBids.length === 0) {
+      return res.json({
+        success: true,
+        rankings: []
+      });
+    }
+
+    // Group by bidder and get their lowest bid (reverse auction - lowest wins)
+    const bidderLowestBids = {};
+    allBids.forEach(bid => {
+      const bidderId = bid.bidder_id;
+      if (!bidderLowestBids[bidderId] || bid.amount < bidderLowestBids[bidderId].amount) {
+        bidderLowestBids[bidderId] = {
+          bidder_id: bidderId,
+          amount: bid.amount,
+          bid_time: bid.bid_time,
+          user_id: bid.users.user_id,
+          name: bid.users.name,
+          company: bid.users.company
+        };
+      }
+    });
+
+    // Convert to array and sort by amount (lowest first = rank 1)
+    const rankings = Object.values(bidderLowestBids)
+      .sort((a, b) => a.amount - b.amount);
+
+    res.json({
+      success: true,
+      rankings
+    });
+
+  } catch (error) {
+    console.error('Get admin auction rankings error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get overall auction results (completed auctions with winners)
+const getAuctionResults = async (req, res) => {
+  try {
+    // Get all completed or ended auctions
+    const { data: auctions, error: auctionsError } = await supabaseAdmin
+      .from('auctions')
+      .select('*')
+      .order('auction_date', { ascending: false });
+
+    if (auctionsError) {
+      console.error('Get auction results error:', auctionsError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch auction results'
+      });
+    }
+
+    const results = await Promise.all(
+      auctions.map(async (auction) => {
+        try {
+          // Check if auction has ended
+          const nowSL = moment().tz('Asia/Colombo');
+          const startDateTime = moment
+            .tz(`${auction.auction_date} ${auction.start_time}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Colombo');
+          const endDateTime = startDateTime.clone().add(auction.duration_minutes, 'minutes');
+          
+          const hasEnded = nowSL.isAfter(endDateTime) || auction.status === 'completed';
+
+          if (!hasEnded && auction.status !== 'cancelled') {
+            return null; // Skip ongoing auctions
+          }
+
+          // Get winner information for ended auctions
+          let winner = null;
+          let winningPrice = null;
+
+          if (auction.status !== 'cancelled') {
+            // Get all bids for this auction
+            const { data: auctionBids, error: bidsError } = await supabaseAdmin
+              .from('bids')
+              .select(`
+                bidder_id,
+                amount,
+                bid_time,
+                users(
+                  user_id,
+                  name,
+                  company
+                )
+              `)
+              .eq('auction_id', auction.id);
+
+            if (!bidsError && auctionBids && auctionBids.length > 0) {
+              // Group by bidder and get their lowest bid
+              const bidderLowestBids = {};
+              auctionBids.forEach(bid => {
+                const bidderId = bid.bidder_id;
+                if (!bidderLowestBids[bidderId] || bid.amount < bidderLowestBids[bidderId].amount) {
+                  bidderLowestBids[bidderId] = {
+                    amount: bid.amount,
+                    bid_time: bid.bid_time,
+                    user_id: bid.users.user_id,
+                    name: bid.users.name,
+                    company: bid.users.company
+                  };
+                }
+              });
+
+              // Find the winner (lowest amount, earliest time if tie)
+              if (Object.keys(bidderLowestBids).length > 0) {
+                const sortedBidders = Object.entries(bidderLowestBids)
+                  .sort(([, bidA], [, bidB]) => {
+                    if (bidA.amount === bidB.amount) {
+                      return new Date(bidA.bid_time) - new Date(bidB.bid_time);
+                    }
+                    return bidA.amount - bidB.amount;
+                  });
+
+                const [winnerId, winnerInfo] = sortedBidders[0];
+                winner = {
+                  bidder_id: winnerId,
+                  user_id: winnerInfo.user_id,
+                  name: winnerInfo.name,
+                  company: winnerInfo.company
+                };
+                winningPrice = winnerInfo.amount;
+              }
+            }
+          }
+
+          return {
+            auction_id: auction.auction_id,
+            title: auction.title,
+            auction_date: auction.auction_date,
+            start_time: auction.start_time,
+            status: hasEnded ? (auction.status === 'cancelled' ? 'cancelled' : 'completed') : auction.status,
+            winning_bidder_id: winner?.user_id || null,
+            bidder_name: winner?.name || null,
+            bidder_company: winner?.company || null,
+            winning_price: winningPrice
+          };
+
+        } catch (error) {
+          console.error(`Error processing auction ${auction.id}:`, error);
+          return {
+            auction_id: auction.auction_id,
+            title: auction.title,
+            auction_date: auction.auction_date,
+            start_time: auction.start_time,
+            status: 'error',
+            winning_bidder_id: null,
+            bidder_name: null,
+            bidder_company: null,
+            winning_price: null
+          };
+        }
+      })
+    );
+
+    // Filter out null results (ongoing auctions) and sort by date
+    const filteredResults = results
+      .filter(result => result !== null)
+      .sort((a, b) => new Date(b.auction_date) - new Date(a.auction_date));
+
+    res.json({
+      success: true,
+      results: filteredResults
+    });
+
+  } catch (error) {
+    console.error('Get auction results error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Export the new functions
 module.exports = {
   createAuction,
   getLiveAuction,
   getAllAuctions,
   getAuction,
-  getLiveRankings
+  getLiveRankings,
+  getAdminLiveAuctions,      // New
+  getAdminAuctionRankings,   // New
+  getAuctionResults          // New
 };
-
-
-/* get live auction for admin
-get live auction for biider 
-  get all auctions for admin
-  get all auctions for bidder
-  get live auction details
-  
-
-*/
