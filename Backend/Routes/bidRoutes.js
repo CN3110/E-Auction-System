@@ -4,7 +4,7 @@ const {
   placeBid,
   getLatestBid,
   getBidderRank,
-  getMinBidAmount,
+  
   getAuctionBids,
   getBidderHistory
 } = require('../Controllers/bidController');
@@ -20,7 +20,7 @@ router.get('/latest', authenticate, authorizeRoles('bidder'), getLatestBid);
 router.get('/rank', authenticate, authorizeRoles('bidder'), getBidderRank);
 
 // Get minimum bid amount to lead - FIXED: Added auth
-router.get('/min-amount', authenticate, authorizeRoles('bidder'), getMinBidAmount);
+//router.get('/min-amount', authenticate, authorizeRoles('bidder'), getMinBidAmount);
 
 // Get all bids for an auction (admin only) - FIXED: Added proper auth
 router.get('/auction/:auctionId', authenticate, authorizeRoles('admin'), getAuctionBids);

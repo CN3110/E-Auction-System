@@ -86,7 +86,7 @@ const LiveAuction = () => {
   const placeBid = useCallback(async (auctionId, amount) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5000/api/bidder/${auctionId}/bids`, {
+      const response = await fetch(`http://localhost:5000/api/bid/`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
