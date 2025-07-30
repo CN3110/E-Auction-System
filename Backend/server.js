@@ -99,7 +99,7 @@ const updateLiveAuctionRankings = async () => {
       return nowSL.isBetween(startDateTime, endDateTime);
     });
     
-    console.log(`Updating rankings for ${liveAuctions.length} live auctions`);
+    //console.log(`Updating rankings for ${liveAuctions.length} live auctions`);
     
     // Update rankings for each live auction
     for (const auction of liveAuctions) {
