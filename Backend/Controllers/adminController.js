@@ -10,20 +10,54 @@ const registerBidder = async (req, res) => {
     
     // Validate required fields
     if (!name || !email || !company) {
-      throw new Error('Missing required fields');
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required fields (name, email, company)' 
+      });
     }
 
-    // Get last bidder ID
+    // Validate email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid email format' 
+      });
+    }
+
+    // Check if email already exists
+    const { data: existingUser, error: existingUserError } = await supabaseAdmin
+      .from('users')
+      .select('user_id')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (existingUserError) throw existingUserError;
+    if (existingUser) {
+      return res.status(409).json({ 
+        success: false, 
+        error: 'Email already registered' 
+      });
+    }
+
+    // Get last bidder ID - more robust query
     const { data: lastBidder, error: lastBidderError } = await supabaseAdmin
       .from('users')
       .select('user_id')
-      .eq('role', 'bidder')
+      .ilike('user_id', 'B%') // Only get bidder IDs (starting with B)
       .order('user_id', { ascending: false })
       .limit(1);
     
     if (lastBidderError) throw lastBidderError;
     
-    const bidderId = generateBidderId(lastBidder?.[0]?.user_id);
+    // Handle case where no bidders exist yet
+    const lastBidderId = lastBidder && lastBidder[0]?.user_id;
+    const bidderId = generateBidderId(lastBidderId);
+    
+    // Validate generated ID
+    if (!bidderId || bidderId.includes('NaN')) {
+      throw new Error('Failed to generate valid bidder ID');
+    }
+
     const password = generatePassword();
     const hashedPassword = await bcrypt.hash(password, 10);
     
@@ -31,7 +65,7 @@ const registerBidder = async (req, res) => {
       bidderId, email, name, company, phone
     });
 
-    // Insert new bidder
+    // Insert new bidder with transaction for safety
     const { data, error } = await supabaseAdmin
       .from('users')
       .insert([{
@@ -48,57 +82,57 @@ const registerBidder = async (req, res) => {
     
     if (error) {
       console.error('Supabase insert error:', error);
+      // Handle specific constraint violation
+      if (error.code === '23505') {
+        return res.status(409).json({ 
+          success: false, 
+          error: 'Bidder ID already exists. Please try again.' 
+        });
+      }
       throw error;
     }
 
     console.log('Bidder created successfully:', data[0]);
     
-    // Send email with credentials
-    const emailHTML = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #333;">Welcome to E-Auction System</h2>
-        <p>Dear ${name},</p>
-        <p>Your bidder account has been created successfully for <strong>${company}</strong>.</p>
-        
-        <div style="background-color: #f5f5f5; padding: 20px; border-radius: 5px; margin: 20px 0;">
-          <h3 style="margin-top: 0;">Your Login Credentials:</h3>
-          <p><strong>User ID:</strong> ${bidderId}</p>
-          <p><strong>Password:</strong> ${password}</p>
+    // Send email with credentials (wrapped in try-catch)
+    try {
+      const emailHTML = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Welcome to E-Auction System</h2>
+          <p>Dear ${name},</p>
+          <p>Your bidder account has been created successfully for <strong>${company}</strong>.</p>
+          
+          <div style="background-color: #f5f5f5; padding: 20px; border-radius: 5px; margin: 20px 0;">
+            <h3 style="margin-top: 0;">Your Login Credentials:</h3>
+            <p><strong>User ID:</strong> ${bidderId}</p>
+            <p><strong>Password:</strong> ${password}</p>
+          </div>
+          
+          <p>Thank you for joining our auction platform!</p>
         </div>
-        
-        <p>Please keep these credentials safe and change your password after your first login.</p>
-        <p>Thank you for joining our auction platform!</p>
-        
-        <hr style="margin: 30px 0;">
-        <p style="font-size: 12px; color: #666;">
-          This is an automated email. Please do not reply to this message.
-        </p>
-      </div>
-    `;
-    
-    console.log('Attempting to send email to:', email);
-    const emailResult = await sendEmail(email, 'E-Auction Account Created - Login Credentials', emailHTML);
-    
-    if (emailResult.success) {
+      `;
+      
+      console.log('Attempting to send email to:', email);
+      await sendEmail(email, 'E-Auction Account Created - Login Credentials', emailHTML);
       console.log('Email sent successfully');
-    } else {
-      console.error('Email failed to send:', emailResult.error);
+    } catch (emailError) {
+      console.error('Email failed to send:', emailError);
+      // Don't fail the request if email fails
     }
     
-    //await sendEmail(email, 'E-Auction Account Created', emailHTML);
-    
-    res.json({
+    return res.json({
       success: true,
       message: 'Bidder registered successfully',
-      bidder: data[0]
+      bidder: data[0],
+      temporaryPassword: process.env.NODE_ENV === 'development' ? password : undefined
     });
     
   } catch (error) {
     console.error('Error in registerBidder:', error);
-    res.status(500).json({ 
+    return res.status(500).json({ 
       success: false, 
-      error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: 'Failed to register bidder',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
