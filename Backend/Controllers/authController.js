@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const supabase = require('../Config/database').supabaseClient;
+const { supabaseAdmin } = require('../Config/database'); // Use admin client for database operations
 
 // Hardcoded admin credentials
 const ADMIN_CREDENTIALS = {
@@ -12,9 +12,14 @@ const login = async (req, res) => {
   try {
     const { user_id, password } = req.body;
 
+    console.log('Login attempt:', { user_id, password: '***' }); // Debug log
+
     // Handle admin login
     if (user_id.toUpperCase() === ADMIN_CREDENTIALS.user_id) {
+      console.log('Admin login attempt detected');
+      
       if (password !== ADMIN_CREDENTIALS.password) {
+        console.log('Admin password mismatch');
         return res.status(401).json({ success: false, error: 'Invalid admin credentials' });
       }
 
@@ -24,6 +29,7 @@ const login = async (req, res) => {
         process.env.JWT_SECRET
       );
 
+      console.log('Admin login successful');
       return res.json({
         success: true,
         token,
@@ -40,28 +46,43 @@ const login = async (req, res) => {
 
     // Handle bidder login (user_id starts with 'B')
     if (!user_id.toUpperCase().startsWith('B')) {
+      console.log('Invalid user ID format:', user_id);
       return res.status(401).json({ success: false, error: 'Invalid user ID format' });
     }
 
-    // Find bidder in database
-    const { data: user, error } = await supabase
+    console.log('Bidder login attempt for:', user_id.toUpperCase());
+
+    // Find bidder in database using admin client
+    const { data: user, error } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('user_id', user_id.toUpperCase())
+      .eq('is_active', true)
+      .is('deleted_at', null)
       .single();
 
-    if (error || !user) {
+    if (error) {
+      console.log('Database error:', error);
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
+
+    if (!user) {
+      console.log('User not found:', user_id.toUpperCase());
+      return res.status(401).json({ success: false, error: 'Invalid credentials' });
+    }
+
+    console.log('User found:', user.user_id);
 
     // Check password
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
+      console.log('Password mismatch for user:', user.user_id);
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
 
-    // Check if user is active
+    // Check if user is active (double check)
     if (!user.is_active) {
+      console.log('User account is deactivated:', user.user_id);
       return res.status(403).json({ success: false, error: 'Account is deactivated' });
     }
 
@@ -70,6 +91,8 @@ const login = async (req, res) => {
       { id: user.id, role: user.role, user_id: user.user_id }, 
       process.env.JWT_SECRET
     );
+
+    console.log('Bidder login successful:', user.user_id);
 
     res.json({ 
       success: true, 
@@ -84,18 +107,18 @@ const login = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
-
 
 const changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.id;
 
-    // Get user from database
-    const { data: user, error: userError } = await supabase
+    // Get user from database using admin client
+    const { data: user, error: userError } = await supabaseAdmin
       .from('users')
       .select('password_hash')
       .eq('id', userId)
@@ -112,10 +135,13 @@ const changePassword = async (req, res) => {
     // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Update password
-    const { error: updateError } = await supabase
+    // Update password using admin client
+    const { error: updateError } = await supabaseAdmin
       .from('users')
-      .update({ password_hash: hashedPassword })
+      .update({ 
+        password_hash: hashedPassword,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', userId);
 
     if (updateError) throw updateError;

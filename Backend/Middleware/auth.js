@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { supabaseClient } = require('../Config/database');
+const { supabaseAdmin } = require('../Config/database');
 
 const authenticate = async (req, res, next) => {
   try {
@@ -10,7 +10,23 @@ const authenticate = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const { data: user, error } = await supabaseClient
+    
+    // Handle admin authentication (hardcoded admin)
+    if (decoded.user_id === 'ADMIN') {
+      req.user = {
+        id: 'admin-hardcoded-id',
+        user_id: 'ADMIN',
+        name: 'System Administrator',
+        email: 'admin@eauction.com',
+        role: 'admin',
+        company: 'Anunine Holdings Pvt Ltd',
+        is_active: true
+      };
+      return next();
+    }
+
+    // Handle bidder authentication (database lookup)
+    const { data: user, error } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('id', decoded.id)
@@ -19,12 +35,14 @@ const authenticate = async (req, res, next) => {
       .single();
 
     if (error || !user) {
+      console.log('User authentication failed:', error || 'User not found');
       throw new Error('User not found or inactive');
     }
 
     req.user = user;
     next();
   } catch (error) {
+    console.error('Authentication error:', error.message);
     res.status(401).json({ success: false, error: 'Please authenticate' });
   }
 };
