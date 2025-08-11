@@ -5,13 +5,16 @@ const {
   getLiveAuction,
   getAllAuctions,
   getAuction,
-  getLiveRankings
+  getLiveRankings,
+  getAllAuctionsAdmin,
 } = require('../Controllers/auctionController');
 const { authenticateToken, requireAdmin, requireBidder } = require('../Middleware/auth');
 const { authenticate } = require('../Middleware/auth');
 
 // Create auction (admin only)
 router.post('/create', createAuction);
+
+router.get('/', getAllAuctionsAdmin);
 
 // Get live auction for logged bidder
 router.get('/bidder/live', authenticate, requireBidder, getLiveAuction);

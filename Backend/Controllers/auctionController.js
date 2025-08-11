@@ -520,6 +520,121 @@ const getAuctionResults = async (req, res) => {
   }
 };
 
+
+const getAllAuctionsAdmin = async (req, res) => {
+  try {
+    const { status, date, from_date, to_date, title, page = 1, limit = 20 } = req.query;
+    const nowSL = moment().tz('Asia/Colombo');
+
+    // Base query for admin
+    let query = supabaseAdmin
+      .from('auctions')
+      .select(`
+        *,
+        auction_bidders(
+          bidder_id,
+          users(
+            id,
+            name,
+            company,
+            user_id
+          )
+        ),
+        bids!left(
+          amount,
+          bid_time,
+          bidder_id
+        )
+      `, { count: 'exact' });
+
+    // Apply filters
+    if (status) {
+      if (status === 'live') {
+        // Special case for live auctions - calculate based on time
+        query = query.or('status.eq.scheduled,status.eq.live');
+      } else {
+        query = query.eq('status', status);
+      }
+    }
+
+    if (date) {
+      query = query.eq('auction_date', date);
+    } else if (from_date || to_date) {
+      if (from_date && to_date) {
+        query = query.gte('auction_date', from_date).lte('auction_date', to_date);
+      } else if (from_date) {
+        query = query.gte('auction_date', from_date);
+      } else if (to_date) {
+        query = query.lte('auction_date', to_date);
+      }
+    }
+
+    if (title) {
+      query = query.ilike('title', `%${title}%`);
+    }
+
+    // Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const offset = (pageNum - 1) * limitNum;
+    query = query.range(offset, offset + limitNum - 1);
+
+    // Order by date (newest first)
+    query = query.order('auction_date', { ascending: false });
+
+    const { data: auctions, error, count } = await query;
+
+    if (error) {
+      console.error('Get auctions error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch auctions'
+      });
+    }
+
+    // Enhance the data with calculated status and bidder count
+    const enhancedAuctions = auctions.map(auction => {
+      const startDateTime = moment.tz(
+        `${auction.auction_date} ${auction.start_time}`,
+        'YYYY-MM-DD HH:mm:ss',
+        'Asia/Colombo'
+      );
+      const endDateTime = startDateTime.clone().add(auction.duration_minutes, 'minutes');
+      
+      let calculatedStatus = auction.status;
+      if (auction.status === 'scheduled' && nowSL.isAfter(startDateTime)) {
+        calculatedStatus = nowSL.isBefore(endDateTime) ? 'live' : 'completed';
+      }
+
+      return {
+        ...auction,
+        calculated_status: calculatedStatus,
+        bidder_count: auction.auction_bidders?.length || 0,
+        has_bids: auction.bids?.length > 0
+      };
+    });
+
+    res.json({
+      success: true,
+      auctions: enhancedAuctions,
+      pagination: {
+        total: count,
+        page: pageNum,
+        limit: limitNum,
+        total_pages: Math.ceil(count / limitNum)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get all auctions error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+};
+
+
 // Export the new functions
 module.exports = {
   createAuction,
@@ -529,5 +644,6 @@ module.exports = {
   getLiveRankings,
   getAdminLiveAuctions,      // New
   getAdminAuctionRankings,   // New
-  getAuctionResults          // New
+  getAuctionResults,
+  getAllAuctionsAdmin,         
 };

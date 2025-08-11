@@ -42,12 +42,41 @@ export const createAuction = async (auctionData) => {
   }
 };
 
+export const getAllAuctions = async () => {
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+
+    const response = await fetch(`${API_URL}/auction/`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch auctions');
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Get all auctions error:', error);
+    throw error;
+  }
+};
+
 
 
 // Add more auction-related services as needed
 export default {
   fetchActiveBidders,
-  createAuction
+  createAuction,
+  getAllAuctions
 };
 
 

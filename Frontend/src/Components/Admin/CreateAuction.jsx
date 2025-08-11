@@ -6,13 +6,24 @@ import {
   FormControlLabel, 
   TextareaAutosize, 
   CircularProgress, 
-  Alert 
+  Alert,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Chip,
+  Typography,
+  Box
 } from '@mui/material';
 import '../../styles/createAuction.css';
 import Card from '../Common/Card';
 import { 
   fetchActiveBidders, 
-  createAuction 
+  createAuction,
+  getAllAuctions 
 } from '../../services/auctionService';
 
 const CreateAuction = () => {
@@ -27,8 +38,10 @@ const CreateAuction = () => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [biddersList, setBiddersList] = useState([]);
+  const [createdAuctions, setCreatedAuctions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [biddersLoading, setBiddersLoading] = useState(true);
+  const [auctionsLoading, setAuctionsLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -46,6 +59,22 @@ const CreateAuction = () => {
     };
     loadBidders();
   }, []);
+
+  useEffect(() => {
+    loadCreatedAuctions();
+  }, []);
+
+  const loadCreatedAuctions = async () => {
+    try {
+      setAuctionsLoading(true);
+      const data = await getAllAuctions();
+      setCreatedAuctions(data.auctions || []);
+    } catch (error) {
+      console.error('Failed to fetch created auctions:', error);
+    } finally {
+      setAuctionsLoading(false);
+    }
+  };
 
   const filteredBidders = biddersList.filter(bidder =>
     bidder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -125,11 +154,49 @@ const CreateAuction = () => {
         selected_bidders: []
       });
       setSearchTerm('');
+      
+      // Reload the created auctions list
+      await loadCreatedAuctions();
+      
     } catch (error) {
       setError(error.message || 'Failed to create auction. Please try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const getAuctionStatus = (auction) => {
+    const now = new Date();
+    const auctionDateTime = new Date(`${auction.auction_date}T${auction.start_time}`);
+    const endDateTime = new Date(auctionDateTime.getTime() + (auction.duration_minutes * 60000));
+    
+    if (auction.status === 'cancelled') {
+      return { status: 'Cancelled', color: 'error' };
+    } else if (auction.status === 'completed') {
+      return { status: 'Completed', color: 'success' };
+    } else if (now < auctionDateTime) {
+      return { status: 'Scheduled', color: 'info' };
+    } else if (now >= auctionDateTime && now <= endDateTime) {
+      return { status: 'Live', color: 'warning' };
+    } else {
+      return { status: 'Ended', color: 'default' };
+    }
+  };
+
+  const formatDate = (dateStr) => {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const formatTime = (timeStr) => {
+    return new Date(`2000-01-01T${timeStr}`).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
   };
 
   if (biddersLoading) {
@@ -143,6 +210,7 @@ const CreateAuction = () => {
 
   return (
     <div className="container my-1">
+      {/* Create Auction Form */}
       <Card>
         {error && (
           <Alert severity="error" className="mb-3" onClose={() => setError('')}>
@@ -301,6 +369,105 @@ const CreateAuction = () => {
           </div>
         </form>
       </Card>
+
+      {/* View Created Auctions Table */}
+      <Box sx={{ mt: 4 }}>
+        <Card>
+          <Typography variant="h6" sx={{ mb: 2, fontWeight: 'bold' }}>
+            Created Auctions
+          </Typography>
+          
+          {auctionsLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
+              <CircularProgress />
+              <Typography sx={{ ml: 2 }}>Loading auctions...</Typography>
+            </Box>
+          ) : createdAuctions.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography color="text.secondary">
+                No auctions created yet
+              </Typography>
+            </Box>
+          ) : (
+            <TableContainer component={Paper} sx={{ maxHeight: 500 }}>
+              <Table stickyHeader>
+                <TableHead>
+                  <TableRow>
+                    <TableCell><strong>Auction ID</strong></TableCell>
+                    <TableCell><strong>Title</strong></TableCell>
+                    <TableCell><strong>Date</strong></TableCell>
+                    <TableCell><strong>Time</strong></TableCell>
+                    <TableCell><strong>Duration</strong></TableCell>
+                    <TableCell><strong>Special Notices</strong></TableCell>
+                    <TableCell><strong>Invited Bidders</strong></TableCell>
+                    <TableCell><strong>Status</strong></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {createdAuctions.map((auction) => {
+                    const statusInfo = getAuctionStatus(auction);
+                    return (
+                      <TableRow key={auction.id} hover>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {auction.auction_id}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {auction.title}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {formatDate(auction.auction_date)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {formatTime(auction.start_time)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {auction.duration_minutes} mins
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography 
+                            variant="body2" 
+                            sx={{ 
+                              maxWidth: 200, 
+                              overflow: 'hidden', 
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}
+                            title={auction.special_notices}
+                          >
+                            {auction.special_notices || '-'}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" color="primary">
+                            {auction.auction_bidders?.length || 0} bidders
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={statusInfo.status}
+                            color={statusInfo.color}
+                            size="small"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Card>
+      </Box>
     </div>
   );
 };
